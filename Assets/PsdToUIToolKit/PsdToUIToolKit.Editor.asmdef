@@ -1,0 +1,18 @@
+{
+    "name": "PsdToUIToolKit.Editor",
+    "rootNamespace": "PsdTools.UIToolKit",
+    "references": [
+        "PsdTools.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
