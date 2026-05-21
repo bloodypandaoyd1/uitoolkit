@@ -90,18 +90,50 @@ namespace PsdTools.UIToolKit
 
         public static PsdUiToolkitLayoutTree Analyze(PsdImage psd, PsdUiToolkitLayerConfigMap configMap, PsdUiToolkitRasterExportResult rasterResult, string rootName)
         {
+            if (rasterResult == null)
+                throw new ArgumentNullException(nameof(rasterResult));
+
+            return AnalyzeInternal(psd, configMap, rasterResult, rootName, false);
+        }
+
+        public static PsdUiToolkitLayoutTree AnalyzeForInspector(PsdImage psd, PsdUiToolkitLayerConfigMap configMap, string rootName)
+        {
+            return AnalyzeInternal(psd, configMap, null, rootName, true);
+        }
+
+        public static bool TryFindNode(PsdUiToolkitLayoutTree tree, int layerId, out PsdUiToolkitLayoutNode node, out PsdUiToolkitLayoutNode parent)
+        {
+            node = null;
+            parent = null;
+            if (tree == null)
+                return false;
+
+            for (int i = 0; i < tree.Children.Count; i++)
+            {
+                if (TryFindNodeRecursive(tree.Children[i], null, layerId, out node, out parent))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static PsdUiToolkitLayoutTree AnalyzeInternal(
+            PsdImage psd,
+            PsdUiToolkitLayerConfigMap configMap,
+            PsdUiToolkitRasterExportResult rasterResult,
+            string rootName,
+            bool inspectorMode)
+        {
             if (psd == null)
                 throw new ArgumentNullException(nameof(psd));
             if (configMap == null)
                 throw new ArgumentNullException(nameof(configMap));
-            if (rasterResult == null)
-                throw new ArgumentNullException(nameof(rasterResult));
 
             List<PsdUiToolkitLayoutNode> children = new List<PsdUiToolkitLayoutNode>();
             for (int i = 0; i < psd.Children.Count; i++)
             {
                 Layer child = psd.Children[i];
-                PsdUiToolkitLayoutNode node = BuildNode(child, configMap, rasterResult, i);
+                PsdUiToolkitLayoutNode node = BuildNode(child, configMap, rasterResult, i, inspectorMode);
                 if (node != null)
                     children.Add(node);
             }
@@ -109,18 +141,17 @@ namespace PsdTools.UIToolKit
             return new PsdUiToolkitLayoutTree(rootName, psd.Width, psd.Height, configMap.IsAutoLayoutEnabled(), children);
         }
 
-        private static PsdUiToolkitLayoutNode BuildNode(Layer layer, PsdUiToolkitLayerConfigMap configMap, PsdUiToolkitRasterExportResult rasterResult, int originalIndex)
+        private static PsdUiToolkitLayoutNode BuildNode(Layer layer, PsdUiToolkitLayerConfigMap configMap, PsdUiToolkitRasterExportResult rasterResult, int originalIndex, bool inspectorMode)
         {
             if (layer == null || layer.LayerId == null)
                 return null;
             if (!configMap.IsExported(layer))
                 return null;
-            if (rasterResult.SuppressedLayerIds.Contains(layer.LayerId.Value))
+            if (rasterResult != null && rasterResult.SuppressedLayerIds.Contains(layer.LayerId.Value))
                 return null;
 
             PsdUiToolkitLayerBounds bounds = PsdUiToolkitRasterExporter.GetLayerBounds(layer);
-            bool hasRaster = rasterResult.AssetsByLayerId.ContainsKey(layer.LayerId.Value);
-            bool renderAsLeaf = !layer.IsGroup || hasRaster || rasterResult.CompositeLeafLayerIds.Contains(layer.LayerId.Value);
+            bool renderAsLeaf = ShouldRenderAsLeaf(layer, configMap, rasterResult, inspectorMode);
             PsdUiToolkitLayerConfig config = configMap.Get(layer);
             List<PsdUiToolkitLayoutNode> childNodes = new List<PsdUiToolkitLayoutNode>();
             if (!renderAsLeaf)
@@ -128,7 +159,7 @@ namespace PsdTools.UIToolKit
                 for (int i = 0; i < layer.Children.Count; i++)
                 {
                     Layer child = layer.Children[i];
-                    PsdUiToolkitLayoutNode childNode = BuildNode(child, configMap, rasterResult, i);
+                    PsdUiToolkitLayoutNode childNode = BuildNode(child, configMap, rasterResult, i, inspectorMode);
                     if (childNode != null)
                         childNodes.Add(childNode);
                 }
@@ -139,6 +170,46 @@ namespace PsdTools.UIToolKit
                 ReorderChildrenForLayout(childNodes, bounds, analysis.LayoutType, configMap);
 
             return new PsdUiToolkitLayoutNode(layer, bounds, renderAsLeaf, analysis.LayoutType, analysis.Confidence, analysis.Summary, originalIndex, childNodes);
+        }
+
+        private static bool ShouldRenderAsLeaf(Layer layer, PsdUiToolkitLayerConfigMap configMap, PsdUiToolkitRasterExportResult rasterResult, bool inspectorMode)
+        {
+            if (layer == null)
+                return true;
+            if (!layer.IsGroup)
+                return true;
+
+            if (!inspectorMode && rasterResult != null && layer.LayerId.HasValue)
+            {
+                int layerId = layer.LayerId.Value;
+                return rasterResult.AssetsByLayerId.ContainsKey(layerId)
+                    || rasterResult.CompositeLeafLayerIds.Contains(layerId);
+            }
+
+            return configMap.IsMergeExport(layer) || configMap.UseCustomImage(layer);
+        }
+
+        private static bool TryFindNodeRecursive(PsdUiToolkitLayoutNode current, PsdUiToolkitLayoutNode parentNode, int layerId, out PsdUiToolkitLayoutNode node, out PsdUiToolkitLayoutNode parent)
+        {
+            node = null;
+            parent = null;
+            if (current?.SourceLayer?.LayerId == layerId)
+            {
+                node = current;
+                parent = parentNode;
+                return true;
+            }
+
+            if (current == null)
+                return false;
+
+            for (int i = 0; i < current.Children.Count; i++)
+            {
+                if (TryFindNodeRecursive(current.Children[i], current, layerId, out node, out parent))
+                    return true;
+            }
+
+            return false;
         }
 
         private static LayoutAnalysisResult AnalyzeNodeLayout(

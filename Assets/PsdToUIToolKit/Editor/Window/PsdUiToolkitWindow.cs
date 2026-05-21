@@ -476,8 +476,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.enabled = evt.newValue;
-                PersistConfig();
-                RebuildInspector();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(enabledToggle);
 
@@ -486,7 +485,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.detectionMode = (PsdUiToolkitAutoLayoutMode)evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(modeField);
 
@@ -496,7 +495,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.minimumConfidence = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(confidenceSlider);
 
@@ -505,7 +504,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.alignmentTolerance = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(alignmentToleranceField);
 
@@ -514,7 +513,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.gapTolerance = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(gapToleranceField);
 
@@ -523,7 +522,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.allowVirtualContainers = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(virtualContainerToggle);
 
@@ -532,7 +531,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.allowCrossGroupRegrouping = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(regroupToggle);
 
@@ -541,7 +540,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.detectBackgroundContainers = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(backgroundToggle);
 
@@ -550,7 +549,7 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitExportConfigData current = EnsureConfigData();
                 current.autoLayout.maxNestingDepth = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(nestingField);
 
@@ -572,7 +571,7 @@ namespace PsdTools.UIToolKit
             participateToggle.RegisterValueChangedCallback(evt =>
             {
                 config.participateInAutoLayout = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(participateToggle);
 
@@ -580,7 +579,7 @@ namespace PsdTools.UIToolKit
             roleField.RegisterValueChangedCallback(evt =>
             {
                 config.semanticRole = (PsdUiToolkitSemanticRole)evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(roleField);
 
@@ -588,7 +587,7 @@ namespace PsdTools.UIToolKit
             parentHintField.RegisterValueChangedCallback(evt =>
             {
                 config.parentHintLayerId = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(parentHintField);
 
@@ -596,7 +595,7 @@ namespace PsdTools.UIToolKit
             virtualContainerField.RegisterValueChangedCallback(evt =>
             {
                 config.virtualContainerKey = evt.newValue ?? string.Empty;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(virtualContainerField);
 
@@ -604,8 +603,7 @@ namespace PsdTools.UIToolKit
             layoutTypeField.RegisterValueChangedCallback(evt =>
             {
                 config.forcedLayoutType = (PsdUiToolkitLayoutType)evt.newValue;
-                PersistConfig();
-                RebuildInspector();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(layoutTypeField);
 
@@ -613,7 +611,7 @@ namespace PsdTools.UIToolKit
             forceContainerToggle.RegisterValueChangedCallback(evt =>
             {
                 config.forceContainer = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(forceContainerToggle);
 
@@ -621,7 +619,7 @@ namespace PsdTools.UIToolKit
             forceBackgroundToggle.RegisterValueChangedCallback(evt =>
             {
                 config.forceBackground = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(forceBackgroundToggle);
 
@@ -629,7 +627,7 @@ namespace PsdTools.UIToolKit
             absoluteToggle.RegisterValueChangedCallback(evt =>
             {
                 config.keepAbsoluteInsideParent = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(absoluteToggle);
 
@@ -637,7 +635,7 @@ namespace PsdTools.UIToolKit
             includeInFlowToggle.RegisterValueChangedCallback(evt =>
             {
                 config.includeInFlow = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(includeInFlowToggle);
 
@@ -645,7 +643,7 @@ namespace PsdTools.UIToolKit
             orderField.RegisterValueChangedCallback(evt =>
             {
                 config.orderOverride = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(orderField);
 
@@ -653,7 +651,7 @@ namespace PsdTools.UIToolKit
             sizePolicyField.RegisterValueChangedCallback(evt =>
             {
                 config.sizePolicy = (PsdUiToolkitSizePolicy)evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(sizePolicyField);
 
@@ -661,7 +659,7 @@ namespace PsdTools.UIToolKit
             growWeightField.RegisterValueChangedCallback(evt =>
             {
                 config.growWeight = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(growWeightField);
 
@@ -669,7 +667,7 @@ namespace PsdTools.UIToolKit
             mainAxisField.RegisterValueChangedCallback(evt =>
             {
                 config.mainAxisAlignment = (PsdUiToolkitMainAxisAlignment)evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(mainAxisField);
 
@@ -677,7 +675,7 @@ namespace PsdTools.UIToolKit
             crossAxisField.RegisterValueChangedCallback(evt =>
             {
                 config.crossAxisAlignment = (PsdUiToolkitCrossAxisAlignment)evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(crossAxisField);
 
@@ -685,7 +683,7 @@ namespace PsdTools.UIToolKit
             wrapToggle.RegisterValueChangedCallback(evt =>
             {
                 config.wrap = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(wrapToggle);
 
@@ -693,7 +691,7 @@ namespace PsdTools.UIToolKit
             gridColumnsField.RegisterValueChangedCallback(evt =>
             {
                 config.gridColumnCount = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(gridColumnsField);
 
@@ -701,7 +699,7 @@ namespace PsdTools.UIToolKit
             gridCellWidthField.RegisterValueChangedCallback(evt =>
             {
                 config.gridCellWidth = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(gridCellWidthField);
 
@@ -709,7 +707,7 @@ namespace PsdTools.UIToolKit
             gridCellHeightField.RegisterValueChangedCallback(evt =>
             {
                 config.gridCellHeight = evt.newValue;
-                PersistConfig();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(gridCellHeightField);
 
@@ -717,8 +715,7 @@ namespace PsdTools.UIToolKit
             spacingToggle.RegisterValueChangedCallback(evt =>
             {
                 config.useSpacingOverride = evt.newValue;
-                PersistConfig();
-                RebuildInspector();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(spacingToggle);
 
@@ -728,7 +725,7 @@ namespace PsdTools.UIToolKit
                 spacingField.RegisterValueChangedCallback(evt =>
                 {
                     config.spacingOverride = evt.newValue;
-                    PersistConfig();
+                    PersistConfigAndRebuildInspector();
                 });
                 _inspectorScroll.Add(spacingField);
             }
@@ -737,8 +734,7 @@ namespace PsdTools.UIToolKit
             paddingToggle.RegisterValueChangedCallback(evt =>
             {
                 config.usePaddingOverride = evt.newValue;
-                PersistConfig();
-                RebuildInspector();
+                PersistConfigAndRebuildInspector();
             });
             _inspectorScroll.Add(paddingToggle);
 
@@ -748,7 +744,7 @@ namespace PsdTools.UIToolKit
                 paddingLeftField.RegisterValueChangedCallback(evt =>
                 {
                     config.paddingLeft = evt.newValue;
-                    PersistConfig();
+                    PersistConfigAndRebuildInspector();
                 });
                 _inspectorScroll.Add(paddingLeftField);
 
@@ -756,7 +752,7 @@ namespace PsdTools.UIToolKit
                 paddingTopField.RegisterValueChangedCallback(evt =>
                 {
                     config.paddingTop = evt.newValue;
-                    PersistConfig();
+                    PersistConfigAndRebuildInspector();
                 });
                 _inspectorScroll.Add(paddingTopField);
 
@@ -764,7 +760,7 @@ namespace PsdTools.UIToolKit
                 paddingRightField.RegisterValueChangedCallback(evt =>
                 {
                     config.paddingRight = evt.newValue;
-                    PersistConfig();
+                    PersistConfigAndRebuildInspector();
                 });
                 _inspectorScroll.Add(paddingRightField);
 
@@ -772,14 +768,51 @@ namespace PsdTools.UIToolKit
                 paddingBottomField.RegisterValueChangedCallback(evt =>
                 {
                     config.paddingBottom = evt.newValue;
-                    PersistConfig();
+                    PersistConfigAndRebuildInspector();
                 });
                 _inspectorScroll.Add(paddingBottomField);
             }
 
+            AddDetectedResultSection(config);
+        }
+
+        private void AddDetectedResultSection(PsdUiToolkitLayerConfig config)
+        {
+            string detectedSummary = BuildDetectedResultSummary(config);
+            _inspectorScroll.Add(new HelpBox(detectedSummary, HelpBoxMessageType.Info));
+        }
+
+        private string BuildDetectedResultSummary(PsdUiToolkitLayerConfig config)
+        {
             string parentHintSummary = config.HasParentHint ? config.parentHintLayerId.ToString() : "Auto";
-            string pendingSummary = $"Detected Result (compatibility mode)\nRole: {config.semanticRole}\nLayout: {config.forcedLayoutType}\nParent: {parentHintSummary}\nThe analyzer is now wired into export, but the current compatibility baseline still keeps nodes on absolute positioning until heuristic flow output is enabled for that node.";
-            _inspectorScroll.Add(new HelpBox(pendingSummary, HelpBoxMessageType.Info));
+            if (_psd == null || _selectedLayer?.LayerId == null)
+                return $"Detected Result\nRole: {config.semanticRole}\nLayout: {config.forcedLayoutType}\nParent hint: {parentHintSummary}\nOpen a PSD and select a layer to run layout analysis.";
+
+            if (_configMap == null)
+                _configMap = new PsdUiToolkitLayerConfigMap(EnsureConfigData());
+
+            string rootName = string.IsNullOrEmpty(_psdPath) ? "PSD" : Path.GetFileNameWithoutExtension(_psdPath);
+            PsdUiToolkitLayoutTree analysisTree = PsdUiToolkitAutoLayoutAnalyzer.AnalyzeForInspector(_psd, _configMap, rootName);
+            if (!PsdUiToolkitAutoLayoutAnalyzer.TryFindNode(analysisTree, _selectedLayer.LayerId.Value, out PsdUiToolkitLayoutNode selectedNode, out PsdUiToolkitLayoutNode parentNode) || selectedNode == null)
+                return $"Detected Result\nRole: {config.semanticRole}\nLayout: {config.forcedLayoutType}\nParent hint: {parentHintSummary}\nAnalyzer could not resolve this layer in the current layout tree.";
+
+            bool hasLayoutParent = parentNode != null
+                && (parentNode.LayoutType == PsdUiToolkitLayoutType.Row || parentNode.LayoutType == PsdUiToolkitLayoutType.Column || parentNode.LayoutType == PsdUiToolkitLayoutType.Grid)
+                && config.includeInFlow
+                && !config.keepAbsoluteInsideParent
+                && config.semanticRole != PsdUiToolkitSemanticRole.Background
+                && config.semanticRole != PsdUiToolkitSemanticRole.Overlay
+                && config.semanticRole != PsdUiToolkitSemanticRole.Ignore;
+
+            string parentSummary = parentNode == null
+                ? "Root"
+                : $"{parentNode.SourceLayer?.Name ?? "Unnamed"} ({parentNode.SourceLayer?.LayerId?.ToString() ?? "?"}) / {parentNode.LayoutType} / {parentNode.Confidence:0.##}";
+            string flowSummary = hasLayoutParent ? "Yes" : "No";
+            string summary = hasLayoutParent && parentNode != null
+                ? $"Flow child summary: participates in {parentNode.LayoutType} under {parentNode.SourceLayer?.Name ?? "Unnamed"}. {parentNode.AnalysisSummary}"
+                : selectedNode.AnalysisSummary;
+
+            return $"Detected Result\nRole: {config.semanticRole}\nNode layout: {selectedNode.LayoutType} / {selectedNode.Confidence:0.##}\nDetected parent: {parentSummary}\nFlow child: {flowSummary}\nParent hint: {parentHintSummary}\n{summary}";
         }
 
         private PsdUiToolkitExportConfigData EnsureConfigData()
@@ -822,6 +855,12 @@ namespace PsdTools.UIToolKit
             _configData = PsdUiToolkitConfigStore.Synchronize(_psd, _configData);
             _configMap = new PsdUiToolkitLayerConfigMap(_configData);
             PsdUiToolkitConfigStore.Save(_psdPath, _configData);
+        }
+
+        private void PersistConfigAndRebuildInspector()
+        {
+            PersistConfig();
+            RebuildInspector();
         }
 
         private void UpdatePreview()
