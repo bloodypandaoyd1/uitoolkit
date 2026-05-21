@@ -50,8 +50,14 @@ namespace PsdTools.UIToolKit
 
                 if (data == null)
                     data = new PsdUiToolkitExportConfigData();
+                data.autoLayout = data.autoLayout.GetValidated();
                 if (data.layers == null)
                     data.layers = Array.Empty<PsdUiToolkitLayerConfig>();
+
+                foreach (PsdUiToolkitLayerConfig entry in data.layers)
+                {
+                    entry?.Sanitize();
+                }
 
                 string json = JsonUtility.ToJson(data, true);
                 File.WriteAllText(path, json);
@@ -74,9 +80,14 @@ namespace PsdTools.UIToolKit
         public static PsdUiToolkitExportConfigData Synchronize(PsdImage psd, PsdUiToolkitExportConfigData data)
         {
             if (psd == null)
-                return data ?? new PsdUiToolkitExportConfigData();
+            {
+                PsdUiToolkitExportConfigData fallback = data ?? new PsdUiToolkitExportConfigData();
+                fallback.autoLayout = fallback.autoLayout.GetValidated();
+                return fallback;
+            }
 
             data ??= new PsdUiToolkitExportConfigData();
+            data.autoLayout = data.autoLayout.GetValidated();
             Dictionary<int, PsdUiToolkitLayerConfig> existing = BuildLookup(data);
             List<PsdUiToolkitLayerConfig> ordered = new List<PsdUiToolkitLayerConfig>();
             List<Layer> layers = new List<Layer>();
@@ -91,6 +102,7 @@ namespace PsdTools.UIToolKit
                 if (!existing.TryGetValue(layerId, out PsdUiToolkitLayerConfig entry))
                     entry = PsdUiToolkitLayerConfig.CreateDefault(layer);
 
+                entry.Sanitize();
                 if (string.IsNullOrEmpty(entry.name))
                     entry.name = layer.Name ?? string.Empty;
 
@@ -134,6 +146,7 @@ namespace PsdTools.UIToolKit
             {
                 if (entry == null)
                     continue;
+                entry.Sanitize();
                 lookup[entry.id] = entry;
             }
 

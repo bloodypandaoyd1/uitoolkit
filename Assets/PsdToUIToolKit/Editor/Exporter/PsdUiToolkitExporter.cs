@@ -1493,7 +1493,8 @@ namespace PsdTools.UIToolKit
                 PsdUiToolkitLayerConfigMap configMap = new PsdUiToolkitLayerConfigMap(config);
                 PsdUiToolkitRasterExporter rasterExporter = new PsdUiToolkitRasterExporter(psd, configMap, imageFolderAssetPath, autoImageNaming);
                 PsdUiToolkitRasterExportResult rasterResult = rasterExporter.ExportAll();
-                PsdUiToolkitUxmlWriter.Write(psd, configMap, rasterResult, uxmlAssetPath, psdName);
+                PsdUiToolkitLayoutTree layoutTree = PsdUiToolkitAutoLayoutAnalyzer.Analyze(psd, configMap, rasterResult, psdName);
+                PsdUiToolkitUxmlWriter.Write(layoutTree, configMap, rasterResult, uxmlAssetPath);
                 AssetDatabase.Refresh();
 
                 return new PsdUiToolkitExportArtifacts

@@ -431,6 +431,8 @@ namespace PsdTools.UIToolKit
                 _inspectorScroll.Add(new Label($"Font: {typeLayer.PsdFontName}"));
                 _inspectorScroll.Add(new Label($"Size: {typeLayer.EffectiveFontSize:0.##}"));
             }
+
+            AddAutoLayoutInspectorSection(config);
         }
 
         private void AddExportSettingsSection()
@@ -457,6 +459,335 @@ namespace PsdTools.UIToolKit
                 PsdUiToolkitEditorPrefs.AutoImageNaming = evt.newValue;
             });
             _inspectorScroll.Add(_autoImageNamingToggle);
+
+            if (_psd == null || string.IsNullOrEmpty(_psdPath))
+            {
+                _inspectorScroll.Add(new HelpBox("Open a PSD to configure PSD-scoped auto-layout defaults.", HelpBoxMessageType.Info));
+                return;
+            }
+
+            PsdUiToolkitExportConfigData data = EnsureConfigData();
+            PsdUiToolkitAutoLayoutGlobalConfig autoLayout = data.autoLayout.GetValidated();
+
+            _inspectorScroll.Add(new Label("Auto Layout (PSD)") { style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 10f } });
+
+            Toggle enabledToggle = new Toggle("Enable auto layout") { value = autoLayout.enabled };
+            enabledToggle.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.enabled = evt.newValue;
+                PersistConfig();
+                RebuildInspector();
+            });
+            _inspectorScroll.Add(enabledToggle);
+
+            EnumField modeField = new EnumField("Detection mode", autoLayout.detectionMode);
+            modeField.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.detectionMode = (PsdUiToolkitAutoLayoutMode)evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(modeField);
+
+            Slider confidenceSlider = new Slider("Min confidence", 0f, 1f) { value = autoLayout.minimumConfidence };
+            confidenceSlider.showInputField = true;
+            confidenceSlider.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.minimumConfidence = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(confidenceSlider);
+
+            IntegerField alignmentToleranceField = new IntegerField("Alignment tolerance") { value = autoLayout.alignmentTolerance };
+            alignmentToleranceField.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.alignmentTolerance = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(alignmentToleranceField);
+
+            IntegerField gapToleranceField = new IntegerField("Gap tolerance") { value = autoLayout.gapTolerance };
+            gapToleranceField.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.gapTolerance = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(gapToleranceField);
+
+            Toggle virtualContainerToggle = new Toggle("Allow virtual containers") { value = autoLayout.allowVirtualContainers };
+            virtualContainerToggle.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.allowVirtualContainers = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(virtualContainerToggle);
+
+            Toggle regroupToggle = new Toggle("Allow cross-group regrouping") { value = autoLayout.allowCrossGroupRegrouping };
+            regroupToggle.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.allowCrossGroupRegrouping = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(regroupToggle);
+
+            Toggle backgroundToggle = new Toggle("Detect background containers") { value = autoLayout.detectBackgroundContainers };
+            backgroundToggle.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.detectBackgroundContainers = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(backgroundToggle);
+
+            IntegerField nestingField = new IntegerField("Max nesting depth") { value = autoLayout.maxNestingDepth };
+            nestingField.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.maxNestingDepth = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(nestingField);
+
+            EnumField fallbackField = new EnumField("Fallback", autoLayout.fallbackMode);
+            fallbackField.SetEnabled(false);
+            _inspectorScroll.Add(fallbackField);
+
+            _inspectorScroll.Add(new HelpBox("Auto-layout remains opt-in and falls back to absolute positioning whenever analysis is disabled or confidence is too low.", HelpBoxMessageType.Info));
+        }
+
+        private void AddAutoLayoutInspectorSection(PsdUiToolkitLayerConfig config)
+        {
+            if (config == null)
+                return;
+
+            _inspectorScroll.Add(new Label("Auto Layout") { style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 10f } });
+
+            Toggle participateToggle = new Toggle("Participate in auto layout") { value = config.participateInAutoLayout };
+            participateToggle.RegisterValueChangedCallback(evt =>
+            {
+                config.participateInAutoLayout = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(participateToggle);
+
+            EnumField roleField = new EnumField("Semantic role", config.semanticRole);
+            roleField.RegisterValueChangedCallback(evt =>
+            {
+                config.semanticRole = (PsdUiToolkitSemanticRole)evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(roleField);
+
+            IntegerField parentHintField = new IntegerField("Parent hint layer id") { value = config.parentHintLayerId };
+            parentHintField.RegisterValueChangedCallback(evt =>
+            {
+                config.parentHintLayerId = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(parentHintField);
+
+            TextField virtualContainerField = new TextField("Virtual container key") { value = config.virtualContainerKey };
+            virtualContainerField.RegisterValueChangedCallback(evt =>
+            {
+                config.virtualContainerKey = evt.newValue ?? string.Empty;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(virtualContainerField);
+
+            EnumField layoutTypeField = new EnumField("Forced layout type", config.forcedLayoutType);
+            layoutTypeField.RegisterValueChangedCallback(evt =>
+            {
+                config.forcedLayoutType = (PsdUiToolkitLayoutType)evt.newValue;
+                PersistConfig();
+                RebuildInspector();
+            });
+            _inspectorScroll.Add(layoutTypeField);
+
+            Toggle forceContainerToggle = new Toggle("Force as container") { value = config.forceContainer };
+            forceContainerToggle.RegisterValueChangedCallback(evt =>
+            {
+                config.forceContainer = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(forceContainerToggle);
+
+            Toggle forceBackgroundToggle = new Toggle("Force as background") { value = config.forceBackground };
+            forceBackgroundToggle.RegisterValueChangedCallback(evt =>
+            {
+                config.forceBackground = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(forceBackgroundToggle);
+
+            Toggle absoluteToggle = new Toggle("Keep absolute inside parent") { value = config.keepAbsoluteInsideParent };
+            absoluteToggle.RegisterValueChangedCallback(evt =>
+            {
+                config.keepAbsoluteInsideParent = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(absoluteToggle);
+
+            Toggle includeInFlowToggle = new Toggle("Include in flow") { value = config.includeInFlow };
+            includeInFlowToggle.RegisterValueChangedCallback(evt =>
+            {
+                config.includeInFlow = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(includeInFlowToggle);
+
+            IntegerField orderField = new IntegerField("Order override") { value = config.orderOverride };
+            orderField.RegisterValueChangedCallback(evt =>
+            {
+                config.orderOverride = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(orderField);
+
+            EnumField sizePolicyField = new EnumField("Size policy", config.sizePolicy);
+            sizePolicyField.RegisterValueChangedCallback(evt =>
+            {
+                config.sizePolicy = (PsdUiToolkitSizePolicy)evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(sizePolicyField);
+
+            FloatField growWeightField = new FloatField("Grow weight") { value = config.growWeight };
+            growWeightField.RegisterValueChangedCallback(evt =>
+            {
+                config.growWeight = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(growWeightField);
+
+            EnumField mainAxisField = new EnumField("Main axis align", config.mainAxisAlignment);
+            mainAxisField.RegisterValueChangedCallback(evt =>
+            {
+                config.mainAxisAlignment = (PsdUiToolkitMainAxisAlignment)evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(mainAxisField);
+
+            EnumField crossAxisField = new EnumField("Cross axis align", config.crossAxisAlignment);
+            crossAxisField.RegisterValueChangedCallback(evt =>
+            {
+                config.crossAxisAlignment = (PsdUiToolkitCrossAxisAlignment)evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(crossAxisField);
+
+            Toggle wrapToggle = new Toggle("Wrap") { value = config.wrap };
+            wrapToggle.RegisterValueChangedCallback(evt =>
+            {
+                config.wrap = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(wrapToggle);
+
+            IntegerField gridColumnsField = new IntegerField("Grid columns") { value = config.gridColumnCount };
+            gridColumnsField.RegisterValueChangedCallback(evt =>
+            {
+                config.gridColumnCount = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(gridColumnsField);
+
+            IntegerField gridCellWidthField = new IntegerField("Grid cell width") { value = config.gridCellWidth };
+            gridCellWidthField.RegisterValueChangedCallback(evt =>
+            {
+                config.gridCellWidth = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(gridCellWidthField);
+
+            IntegerField gridCellHeightField = new IntegerField("Grid cell height") { value = config.gridCellHeight };
+            gridCellHeightField.RegisterValueChangedCallback(evt =>
+            {
+                config.gridCellHeight = evt.newValue;
+                PersistConfig();
+            });
+            _inspectorScroll.Add(gridCellHeightField);
+
+            Toggle spacingToggle = new Toggle("Override spacing") { value = config.useSpacingOverride };
+            spacingToggle.RegisterValueChangedCallback(evt =>
+            {
+                config.useSpacingOverride = evt.newValue;
+                PersistConfig();
+                RebuildInspector();
+            });
+            _inspectorScroll.Add(spacingToggle);
+
+            if (config.useSpacingOverride)
+            {
+                IntegerField spacingField = new IntegerField("Spacing") { value = config.spacingOverride };
+                spacingField.RegisterValueChangedCallback(evt =>
+                {
+                    config.spacingOverride = evt.newValue;
+                    PersistConfig();
+                });
+                _inspectorScroll.Add(spacingField);
+            }
+
+            Toggle paddingToggle = new Toggle("Override padding") { value = config.usePaddingOverride };
+            paddingToggle.RegisterValueChangedCallback(evt =>
+            {
+                config.usePaddingOverride = evt.newValue;
+                PersistConfig();
+                RebuildInspector();
+            });
+            _inspectorScroll.Add(paddingToggle);
+
+            if (config.usePaddingOverride)
+            {
+                IntegerField paddingLeftField = new IntegerField("Padding left") { value = config.paddingLeft };
+                paddingLeftField.RegisterValueChangedCallback(evt =>
+                {
+                    config.paddingLeft = evt.newValue;
+                    PersistConfig();
+                });
+                _inspectorScroll.Add(paddingLeftField);
+
+                IntegerField paddingTopField = new IntegerField("Padding top") { value = config.paddingTop };
+                paddingTopField.RegisterValueChangedCallback(evt =>
+                {
+                    config.paddingTop = evt.newValue;
+                    PersistConfig();
+                });
+                _inspectorScroll.Add(paddingTopField);
+
+                IntegerField paddingRightField = new IntegerField("Padding right") { value = config.paddingRight };
+                paddingRightField.RegisterValueChangedCallback(evt =>
+                {
+                    config.paddingRight = evt.newValue;
+                    PersistConfig();
+                });
+                _inspectorScroll.Add(paddingRightField);
+
+                IntegerField paddingBottomField = new IntegerField("Padding bottom") { value = config.paddingBottom };
+                paddingBottomField.RegisterValueChangedCallback(evt =>
+                {
+                    config.paddingBottom = evt.newValue;
+                    PersistConfig();
+                });
+                _inspectorScroll.Add(paddingBottomField);
+            }
+
+            string parentHintSummary = config.HasParentHint ? config.parentHintLayerId.ToString() : "Auto";
+            string pendingSummary = $"Detected Result (compatibility mode)\nRole: {config.semanticRole}\nLayout: {config.forcedLayoutType}\nParent: {parentHintSummary}\nThe analyzer is now wired into export, but the current compatibility baseline still keeps nodes on absolute positioning until heuristic flow output is enabled for that node.";
+            _inspectorScroll.Add(new HelpBox(pendingSummary, HelpBoxMessageType.Info));
+        }
+
+        private PsdUiToolkitExportConfigData EnsureConfigData()
+        {
+            _configData ??= new PsdUiToolkitExportConfigData();
+            _configData.autoLayout = _configData.autoLayout.GetValidated();
+            _configData.layers ??= Array.Empty<PsdUiToolkitLayerConfig>();
+            return _configData;
         }
 
         private PsdUiToolkitLayerConfig GetOrCreateSelectedLayerConfig()
@@ -464,21 +795,21 @@ namespace PsdTools.UIToolKit
             if (_selectedLayer?.LayerId == null)
                 return null;
 
-            if (_configData == null)
-                _configData = new PsdUiToolkitExportConfigData();
-            if (_configData.layers == null)
-                _configData.layers = Array.Empty<PsdUiToolkitLayerConfig>();
+            PsdUiToolkitExportConfigData data = EnsureConfigData();
 
-            foreach (PsdUiToolkitLayerConfig entry in _configData.layers)
+            foreach (PsdUiToolkitLayerConfig entry in data.layers)
             {
                 if (entry != null && entry.id == _selectedLayer.LayerId.Value)
+                {
+                    entry.Sanitize();
                     return entry;
+                }
             }
 
-            List<PsdUiToolkitLayerConfig> layers = new List<PsdUiToolkitLayerConfig>(_configData.layers);
+            List<PsdUiToolkitLayerConfig> layers = new List<PsdUiToolkitLayerConfig>(data.layers);
             PsdUiToolkitLayerConfig config = PsdUiToolkitLayerConfig.CreateDefault(_selectedLayer);
             layers.Add(config);
-            _configData.layers = layers.ToArray();
+            data.layers = layers.ToArray();
             _configMap = new PsdUiToolkitLayerConfigMap(_configData);
             return config;
         }
