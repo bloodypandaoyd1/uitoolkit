@@ -97,27 +97,32 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitRasterExportResult rasterResult,
             FlowChildPlacement placement)
         {
-            Layer layer = node?.SourceLayer;
-            if (layer == null || layer.LayerId == null)
+            if (node == null)
                 return;
-            if (!configMap.IsExported(layer))
+            Layer layer = node.SourceLayer;
+            bool isSynthetic = node.IsSynthetic || layer == null || layer.LayerId == null;
+            if (!isSynthetic && !configMap.IsExported(layer))
                 return;
-            if (rasterResult.SuppressedLayerIds.Contains(layer.LayerId.Value))
+            if (!isSynthetic && rasterResult.SuppressedLayerIds.Contains(layer.LayerId.Value))
                 return;
 
             PsdUiToolkitLayerBounds bounds = node.Bounds;
             int left = bounds.Left - parentLeft;
             int top = bounds.Top - parentTop;
 
-            bool hasRaster = rasterResult.AssetsByLayerId.TryGetValue(layer.LayerId.Value, out PsdUiToolkitRasterAssetInfo rasterInfo);
-            bool renderAsLeaf = node.RenderAsLeaf || !layer.IsGroup || hasRaster || rasterResult.CompositeLeafLayerIds.Contains(layer.LayerId.Value);
+            PsdUiToolkitRasterAssetInfo rasterInfo = null;
+            bool hasRaster = !isSynthetic && rasterResult.AssetsByLayerId.TryGetValue(layer.LayerId.Value, out rasterInfo);
+            bool hasChildren = node.Children.Count > 0;
+            bool renderAsLeaf = !hasChildren && (isSynthetic || node.RenderAsLeaf || !layer.IsGroup || hasRaster || rasterResult.CompositeLeafLayerIds.Contains(layer.LayerId.Value));
 
             string indent = new string(' ', indentLevel * 2);
-            string elementName = string.IsNullOrEmpty(layer.Name) ? $"Layer_{layer.LayerId.Value}" : layer.Name;
+            string elementName = isSynthetic
+                ? (string.IsNullOrEmpty(node.DisplayName) ? $"Auto_{node.OriginalIndex}" : node.DisplayName)
+                : (string.IsNullOrEmpty(layer.Name) ? $"Layer_{layer.LayerId.Value}" : layer.Name);
             FlowContainerPlan flowPlan = BuildFlowContainerPlan(node, configMap);
             string style = BuildStyle(node, layer, bounds, left, top, configMap, rasterInfo, placement, flowPlan);
 
-            if (layer.Kind == LayerKind.Type)
+            if (!isSynthetic && layer.Kind == LayerKind.Type)
             {
                 TypeLayer typeLayer = (TypeLayer)layer;
                 builder.Append(indent);
@@ -126,7 +131,7 @@ namespace PsdTools.UIToolKit
                 return;
             }
 
-            if (!layer.IsGroup || renderAsLeaf)
+            if (!hasChildren)
             {
                 builder.Append(indent);
                 builder.Append($"<ui:VisualElement name=\"{EscapeAttribute(elementName)}\" style=\"{EscapeAttribute(style)}\" />");
@@ -191,11 +196,21 @@ namespace PsdTools.UIToolKit
                 style.AppendFormat(CultureInfo.InvariantCulture, " left: {0}px; top: {1}px; width: {2}px; height: {3}px;", left, top, bounds.Width, bounds.Height);
             }
 
-            style.AppendFormat(CultureInfo.InvariantCulture, " opacity: {0:0.###};", layer.OpacityFloat);
-            style.Append(configMap.IsVisible(layer) ? " display: flex;" : " display: none;");
+            if (layer != null)
+            {
+                style.AppendFormat(CultureInfo.InvariantCulture, " opacity: {0:0.###};", layer.OpacityFloat);
+                style.Append(configMap.IsVisible(layer) ? " display: flex;" : " display: none;");
+            }
+            else
+            {
+                style.Append(" opacity: 1; display: flex;");
+            }
 
-            PsdUiToolkitLayerConfig layerConfig = configMap.Get(layer);
+            PsdUiToolkitLayerConfig layerConfig = layer == null ? PsdUiToolkitLayerConfig.CreateDefault(null) : configMap.Get(layer);
             AppendLayoutStyleHints(style, node, layerConfig, flowPlan, placement.UseFlow);
+
+            if (layer == null)
+                return style.ToString().Trim();
 
             if (layer.Kind == LayerKind.Type)
             {
@@ -339,8 +354,11 @@ namespace PsdTools.UIToolKit
 
         private static bool ShouldRenderAsFlowItem(PsdUiToolkitLayoutNode parentNode, PsdUiToolkitLayoutNode childNode, PsdUiToolkitLayerConfigMap configMap)
         {
-            if (parentNode == null || childNode?.SourceLayer == null)
+            if (parentNode == null || childNode == null)
                 return false;
+
+            if (childNode.IsSynthetic)
+                return childNode.LayoutType != PsdUiToolkitLayoutType.Overlay;
 
             PsdUiToolkitLayerConfig childConfig = configMap.Get(childNode.SourceLayer);
             if (!configMap.ParticipateInAutoLayout(childNode.SourceLayer))

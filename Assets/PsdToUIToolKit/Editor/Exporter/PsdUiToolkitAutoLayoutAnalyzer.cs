@@ -14,7 +14,10 @@ namespace PsdTools.UIToolKit
             float confidence,
             string analysisSummary,
             int originalIndex,
-            List<PsdUiToolkitLayoutNode> children)
+            List<PsdUiToolkitLayoutNode> children,
+            string displayName = null,
+            bool isSynthetic = false,
+            string rebuildReason = null)
         {
             SourceLayer = sourceLayer;
             Bounds = bounds;
@@ -24,6 +27,11 @@ namespace PsdTools.UIToolKit
             AnalysisSummary = analysisSummary ?? string.Empty;
             OriginalIndex = originalIndex;
             Children = children ?? new List<PsdUiToolkitLayoutNode>();
+            DisplayName = string.IsNullOrEmpty(displayName)
+                ? (sourceLayer?.Name ?? string.Empty)
+                : displayName;
+            IsSynthetic = isSynthetic;
+            RebuildReason = rebuildReason ?? string.Empty;
         }
 
         public Layer SourceLayer { get; }
@@ -34,6 +42,9 @@ namespace PsdTools.UIToolKit
         public string AnalysisSummary { get; }
         public int OriginalIndex { get; }
         public List<PsdUiToolkitLayoutNode> Children { get; }
+        public string DisplayName { get; }
+        public bool IsSynthetic { get; }
+        public string RebuildReason { get; }
     }
 
     internal sealed class PsdUiToolkitLayoutTree

@@ -213,6 +213,23 @@ namespace PsdTools.UIToolKit
                 return;
             }
 
+            if (_configMap != null && _configMap.GetAutoLayoutConfig().rebuildLayoutTree)
+            {
+                try
+                {
+                    string rootName = string.IsNullOrEmpty(_psdPath) ? "PSD" : Path.GetFileNameWithoutExtension(_psdPath);
+                    PsdUiToolkitLayoutTree analysisTree = BuildCurrentAnalysisTree(rootName);
+                    for (int i = 0; i < analysisTree.Children.Count; i++)
+                        AddLayoutNodeRow(analysisTree.Children[i], 0);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _layerTreeScroll.Add(new HelpBox($"Rebuild analysis failed: {ex.Message}", HelpBoxMessageType.Error));
+                    return;
+                }
+            }
+
             foreach (Layer child in _psd.Children)
                 AddLayerRow(child, 0);
         }
@@ -238,6 +255,63 @@ namespace PsdTools.UIToolKit
 
             foreach (Layer child in layer.Children)
                 AddLayerRow(child, depth + 1);
+        }
+
+        private void AddLayoutNodeRow(PsdUiToolkitLayoutNode node, int depth)
+        {
+            if (node == null)
+                return;
+
+            bool isSelected = node.SourceLayer != null && _selectedLayer == node.SourceLayer;
+            bool containsSelection = node.IsSynthetic && NodeContainsSelectedLayer(node, _selectedLayer);
+            Button row = node.SourceLayer == null
+                ? new Button()
+                : new Button(() => SelectLayer(node.SourceLayer));
+            row.style.unityTextAlign = TextAnchor.MiddleLeft;
+            row.style.marginBottom = 2f;
+            row.style.height = 24f;
+            row.style.paddingLeft = 6f + depth * 14f;
+            row.style.paddingRight = 6f;
+            row.style.backgroundColor = isSelected
+                ? new Color(0.18f, 0.35f, 0.58f, 0.55f)
+                : (containsSelection ? new Color(0.24f, 0.24f, 0.16f, 0.45f) : new Color(0f, 0f, 0f, 0f));
+
+            string nodeName = string.IsNullOrEmpty(node.DisplayName)
+                ? (node.SourceLayer?.Name ?? "Unnamed")
+                : node.DisplayName;
+            string prefix = node.IsSynthetic ? "[Auto] " : string.Empty;
+            string exportMarker = node.SourceLayer != null && _configMap != null && !_configMap.IsExported(node.SourceLayer) ? "[Off] " : string.Empty;
+            string visibilityMarker = node.SourceLayer != null && !node.SourceLayer.Visible ? "[Hidden] " : string.Empty;
+            string kindLabel = node.IsSynthetic
+                ? node.LayoutType.ToString()
+                : (node.SourceLayer == null ? "Layout" : (node.SourceLayer.Kind == LayerKind.Group ? "Group" : node.SourceLayer.Kind.ToString()));
+            row.text = $"{exportMarker}{visibilityMarker}{new string(' ', depth * 2)}{prefix}{nodeName} ({kindLabel})";
+            row.tooltip = string.IsNullOrEmpty(node.RebuildReason)
+                ? node.AnalysisSummary
+                : $"{node.RebuildReason}\n{node.AnalysisSummary}";
+            if (node.SourceLayer == null)
+                row.SetEnabled(false);
+
+            _layerTreeScroll.Add(row);
+
+            for (int i = 0; i < node.Children.Count; i++)
+                AddLayoutNodeRow(node.Children[i], depth + 1);
+        }
+
+        private static bool NodeContainsSelectedLayer(PsdUiToolkitLayoutNode node, Layer selectedLayer)
+        {
+            if (node == null || selectedLayer == null)
+                return false;
+            if (node.SourceLayer == selectedLayer)
+                return true;
+
+            for (int i = 0; i < node.Children.Count; i++)
+            {
+                if (NodeContainsSelectedLayer(node.Children[i], selectedLayer))
+                    return true;
+            }
+
+            return false;
         }
 
         private void SelectLayer(Layer layer)
@@ -517,6 +591,15 @@ namespace PsdTools.UIToolKit
             });
             _inspectorScroll.Add(gapToleranceField);
 
+            Toggle rebuildTreeToggle = new Toggle("Rebuild layout tree") { value = autoLayout.rebuildLayoutTree };
+            rebuildTreeToggle.RegisterValueChangedCallback(evt =>
+            {
+                PsdUiToolkitExportConfigData current = EnsureConfigData();
+                current.autoLayout.rebuildLayoutTree = evt.newValue;
+                PersistConfigAndRebuildInspector();
+            });
+            _inspectorScroll.Add(rebuildTreeToggle);
+
             Toggle virtualContainerToggle = new Toggle("Allow virtual containers") { value = autoLayout.allowVirtualContainers };
             virtualContainerToggle.RegisterValueChangedCallback(evt =>
             {
@@ -557,7 +640,7 @@ namespace PsdTools.UIToolKit
             fallbackField.SetEnabled(false);
             _inspectorScroll.Add(fallbackField);
 
-            _inspectorScroll.Add(new HelpBox("Auto-layout remains opt-in and falls back to absolute positioning whenever analysis is disabled or confidence is too low.", HelpBoxMessageType.Info));
+            _inspectorScroll.Add(new HelpBox("Auto-layout remains opt-in and falls back to absolute positioning whenever analysis is disabled or confidence is too low. Rebuild layout tree inserts a separate layout-tree pass while leaving raster export unchanged.", HelpBoxMessageType.Info));
         }
 
         private void AddAutoLayoutInspectorSection(PsdUiToolkitLayerConfig config)
@@ -792,7 +875,16 @@ namespace PsdTools.UIToolKit
                 _configMap = new PsdUiToolkitLayerConfigMap(EnsureConfigData());
 
             string rootName = string.IsNullOrEmpty(_psdPath) ? "PSD" : Path.GetFileNameWithoutExtension(_psdPath);
-            PsdUiToolkitLayoutTree analysisTree = PsdUiToolkitAutoLayoutAnalyzer.AnalyzeForInspector(_psd, _configMap, rootName);
+            PsdUiToolkitLayoutTree analysisTree;
+            try
+            {
+                analysisTree = BuildCurrentAnalysisTree(rootName);
+            }
+            catch (Exception ex)
+            {
+                return $"Detected Result\nRole: {config.semanticRole}\nLayout: {config.forcedLayoutType}\nParent hint: {parentHintSummary}\nAnalysis failed: {ex.Message}";
+            }
+
             if (!PsdUiToolkitAutoLayoutAnalyzer.TryFindNode(analysisTree, _selectedLayer.LayerId.Value, out PsdUiToolkitLayoutNode selectedNode, out PsdUiToolkitLayoutNode parentNode) || selectedNode == null)
                 return $"Detected Result\nRole: {config.semanticRole}\nLayout: {config.forcedLayoutType}\nParent hint: {parentHintSummary}\nAnalyzer could not resolve this layer in the current layout tree.";
 
@@ -804,15 +896,31 @@ namespace PsdTools.UIToolKit
                 && config.semanticRole != PsdUiToolkitSemanticRole.Overlay
                 && config.semanticRole != PsdUiToolkitSemanticRole.Ignore;
 
+            string parentName = parentNode == null
+                ? "Root"
+                : (string.IsNullOrEmpty(parentNode.DisplayName) ? (parentNode.SourceLayer?.Name ?? "Unnamed") : parentNode.DisplayName);
+            string parentIdSummary = parentNode?.SourceLayer?.LayerId?.ToString() ?? (parentNode?.IsSynthetic == true ? "Auto" : "?");
             string parentSummary = parentNode == null
                 ? "Root"
-                : $"{parentNode.SourceLayer?.Name ?? "Unnamed"} ({parentNode.SourceLayer?.LayerId?.ToString() ?? "?"}) / {parentNode.LayoutType} / {parentNode.Confidence:0.##}";
+                : $"{parentName} ({parentIdSummary}) / {parentNode.LayoutType} / {parentNode.Confidence:0.##}";
             string flowSummary = hasLayoutParent ? "Yes" : "No";
             string summary = hasLayoutParent && parentNode != null
-                ? $"Flow child summary: participates in {parentNode.LayoutType} under {parentNode.SourceLayer?.Name ?? "Unnamed"}. {parentNode.AnalysisSummary}"
+                ? $"Flow child summary: participates in {parentNode.LayoutType} under {parentName}. {parentNode.AnalysisSummary}"
                 : selectedNode.AnalysisSummary;
 
-            return $"Detected Result\nRole: {config.semanticRole}\nNode layout: {selectedNode.LayoutType} / {selectedNode.Confidence:0.##}\nDetected parent: {parentSummary}\nFlow child: {flowSummary}\nParent hint: {parentHintSummary}\n{summary}";
+            string treeMode = _configMap.GetAutoLayoutConfig().rebuildLayoutTree ? "Rebuilt" : "PSD";
+            string rebuildSummary = parentNode?.IsSynthetic == true && !string.IsNullOrEmpty(parentNode.RebuildReason)
+                ? $"\nSynthetic parent: {parentNode.RebuildReason}"
+                : string.Empty;
+
+            return $"Detected Result\nTree mode: {treeMode}\nRole: {config.semanticRole}\nNode layout: {selectedNode.LayoutType} / {selectedNode.Confidence:0.##}\nDetected parent: {parentSummary}\nFlow child: {flowSummary}\nParent hint: {parentHintSummary}\n{summary}{rebuildSummary}";
+        }
+
+        private PsdUiToolkitLayoutTree BuildCurrentAnalysisTree(string rootName)
+        {
+            return _configMap != null && _configMap.GetAutoLayoutConfig().rebuildLayoutTree
+                ? PsdUiToolkitLayoutTreeRebuilder.AnalyzeForInspector(_psd, _configMap, rootName)
+                : PsdUiToolkitAutoLayoutAnalyzer.AnalyzeForInspector(_psd, _configMap, rootName);
         }
 
         private PsdUiToolkitExportConfigData EnsureConfigData()
@@ -860,6 +968,7 @@ namespace PsdTools.UIToolKit
         private void PersistConfigAndRebuildInspector()
         {
             PersistConfig();
+            RebuildLayerTree();
             RebuildInspector();
         }
 

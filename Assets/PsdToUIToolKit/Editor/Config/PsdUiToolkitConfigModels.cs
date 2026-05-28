@@ -87,6 +87,7 @@ namespace PsdTools.UIToolKit
     public struct PsdUiToolkitAutoLayoutGlobalConfig
     {
         public bool enabled;
+        public bool rebuildLayoutTree;
         public PsdUiToolkitAutoLayoutMode detectionMode;
         public float minimumConfidence;
         public int alignmentTolerance;
@@ -100,6 +101,7 @@ namespace PsdTools.UIToolKit
         public static PsdUiToolkitAutoLayoutGlobalConfig Default => new PsdUiToolkitAutoLayoutGlobalConfig
         {
             enabled = false,
+            rebuildLayoutTree = false,
             detectionMode = PsdUiToolkitAutoLayoutMode.Conservative,
             minimumConfidence = 0.8f,
             alignmentTolerance = 8,
