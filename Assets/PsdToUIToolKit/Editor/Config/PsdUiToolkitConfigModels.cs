@@ -27,43 +27,6 @@ namespace PsdTools.UIToolKit
         Overlay = 5,
     }
 
-    public enum PsdUiToolkitSemanticRole
-    {
-        Auto = 0,
-        Container = 1,
-        Background = 2,
-        Content = 3,
-        Decoration = 4,
-        Overlay = 5,
-        Ignore = 6,
-    }
-
-    public enum PsdUiToolkitSizePolicy
-    {
-        Auto = 0,
-        Fixed = 1,
-        Intrinsic = 2,
-        Fill = 3,
-    }
-
-    public enum PsdUiToolkitMainAxisAlignment
-    {
-        Auto = 0,
-        Start = 1,
-        Center = 2,
-        End = 3,
-        SpaceBetween = 4,
-    }
-
-    public enum PsdUiToolkitCrossAxisAlignment
-    {
-        Auto = 0,
-        Start = 1,
-        Center = 2,
-        End = 3,
-        Stretch = 4,
-    }
-
     [Serializable]
     public struct PsdUiToolkitNineSliceParams
     {
@@ -150,30 +113,6 @@ namespace PsdTools.UIToolKit
         public bool useCustomImage;
         public string customImagePath = "";
         public bool participateInAutoLayout = true;
-        public PsdUiToolkitSemanticRole semanticRole = PsdUiToolkitSemanticRole.Auto;
-        public int parentHintLayerId = -1;
-        public string virtualContainerKey = "";
-        public PsdUiToolkitLayoutType forcedLayoutType = PsdUiToolkitLayoutType.Auto;
-        public bool forceContainer;
-        public bool forceBackground;
-        public bool keepAbsoluteInsideParent;
-        public bool includeInFlow = true;
-        public int orderOverride = -1;
-        public PsdUiToolkitSizePolicy sizePolicy = PsdUiToolkitSizePolicy.Auto;
-        public float growWeight;
-        public bool useSpacingOverride;
-        public int spacingOverride;
-        public bool usePaddingOverride;
-        public int paddingLeft;
-        public int paddingTop;
-        public int paddingRight;
-        public int paddingBottom;
-        public PsdUiToolkitMainAxisAlignment mainAxisAlignment = PsdUiToolkitMainAxisAlignment.Auto;
-        public PsdUiToolkitCrossAxisAlignment crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.Auto;
-        public bool wrap;
-        public int gridColumnCount;
-        public int gridCellWidth;
-        public int gridCellHeight;
 
         public static PsdUiToolkitLayerConfig CreateDefault(Layer layer)
         {
@@ -197,30 +136,6 @@ namespace PsdTools.UIToolKit
                 useCustomImage = false,
                 customImagePath = string.Empty,
                 participateInAutoLayout = true,
-                semanticRole = PsdUiToolkitSemanticRole.Auto,
-                parentHintLayerId = -1,
-                virtualContainerKey = string.Empty,
-                forcedLayoutType = PsdUiToolkitLayoutType.Auto,
-                forceContainer = false,
-                forceBackground = false,
-                keepAbsoluteInsideParent = false,
-                includeInFlow = true,
-                orderOverride = -1,
-                sizePolicy = PsdUiToolkitSizePolicy.Auto,
-                growWeight = 0f,
-                useSpacingOverride = false,
-                spacingOverride = 0,
-                usePaddingOverride = false,
-                paddingLeft = 0,
-                paddingTop = 0,
-                paddingRight = 0,
-                paddingBottom = 0,
-                mainAxisAlignment = PsdUiToolkitMainAxisAlignment.Auto,
-                crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.Auto,
-                wrap = false,
-                gridColumnCount = 0,
-                gridCellWidth = 0,
-                gridCellHeight = 0,
             };
         }
 
@@ -240,31 +155,7 @@ namespace PsdTools.UIToolKit
         {
             name ??= string.Empty;
             customImagePath ??= string.Empty;
-            virtualContainerKey ??= string.Empty;
-            parentHintLayerId = Math.Max(-1, parentHintLayerId);
-            orderOverride = Math.Max(-1, orderOverride);
-            growWeight = Math.Max(0f, growWeight);
-            spacingOverride = Math.Max(0, spacingOverride);
-            paddingLeft = Math.Max(0, paddingLeft);
-            paddingTop = Math.Max(0, paddingTop);
-            paddingRight = Math.Max(0, paddingRight);
-            paddingBottom = Math.Max(0, paddingBottom);
-            gridColumnCount = Math.Max(0, gridColumnCount);
-            gridCellWidth = Math.Max(0, gridCellWidth);
-            gridCellHeight = Math.Max(0, gridCellHeight);
-            if (!Enum.IsDefined(typeof(PsdUiToolkitSemanticRole), semanticRole))
-                semanticRole = PsdUiToolkitSemanticRole.Auto;
-            if (!Enum.IsDefined(typeof(PsdUiToolkitLayoutType), forcedLayoutType))
-                forcedLayoutType = PsdUiToolkitLayoutType.Auto;
-            if (!Enum.IsDefined(typeof(PsdUiToolkitSizePolicy), sizePolicy))
-                sizePolicy = PsdUiToolkitSizePolicy.Auto;
-            if (!Enum.IsDefined(typeof(PsdUiToolkitMainAxisAlignment), mainAxisAlignment))
-                mainAxisAlignment = PsdUiToolkitMainAxisAlignment.Auto;
-            if (!Enum.IsDefined(typeof(PsdUiToolkitCrossAxisAlignment), crossAxisAlignment))
-                crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.Auto;
         }
-
-        public bool HasParentHint => parentHintLayerId >= 0;
     }
 
     [Serializable]
@@ -377,8 +268,7 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitLayerConfig config = Get(layer);
             return config.exported
                 && config.visible
-                && config.participateInAutoLayout
-                && config.semanticRole != PsdUiToolkitSemanticRole.Ignore;
+                && config.participateInAutoLayout;
         }
     }
 

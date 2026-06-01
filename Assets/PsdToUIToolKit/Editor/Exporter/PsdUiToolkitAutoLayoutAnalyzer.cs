@@ -163,7 +163,6 @@ namespace PsdTools.UIToolKit
 
             PsdUiToolkitLayerBounds bounds = PsdUiToolkitRasterExporter.GetLayerBounds(layer);
             bool renderAsLeaf = ShouldRenderAsLeaf(layer, configMap, rasterResult, inspectorMode);
-            PsdUiToolkitLayerConfig config = configMap.Get(layer);
             List<PsdUiToolkitLayoutNode> childNodes = new List<PsdUiToolkitLayoutNode>();
             if (!renderAsLeaf)
             {
@@ -176,7 +175,7 @@ namespace PsdTools.UIToolKit
                 }
             }
 
-            LayoutAnalysisResult analysis = AnalyzeNodeLayout(layer, bounds, renderAsLeaf, childNodes, configMap, config);
+            LayoutAnalysisResult analysis = AnalyzeNodeLayout(layer, bounds, renderAsLeaf, childNodes, configMap);
             if (!renderAsLeaf && analysis.LayoutType != PsdUiToolkitLayoutType.Absolute && analysis.LayoutType != PsdUiToolkitLayoutType.Overlay)
                 ReorderChildrenForLayout(childNodes, bounds, analysis.LayoutType, configMap);
 
@@ -228,21 +227,14 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitLayerBounds bounds,
             bool renderAsLeaf,
             List<PsdUiToolkitLayoutNode> childNodes,
-            PsdUiToolkitLayerConfigMap configMap,
-            PsdUiToolkitLayerConfig config)
+            PsdUiToolkitLayerConfigMap configMap)
         {
-            if (config == null)
-                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "No layer config available; keep absolute export.");
-            if (config.forcedLayoutType != PsdUiToolkitLayoutType.Auto)
-                return new LayoutAnalysisResult(config.forcedLayoutType, 1f, $"Layout type forced to {config.forcedLayoutType} by layer override.");
-            if (config.semanticRole == PsdUiToolkitSemanticRole.Overlay && !renderAsLeaf)
-                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Overlay, 1f, "Overlay role forced on this container by layer override.");
             if (!configMap.IsAutoLayoutEnabled())
                 return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "Auto-layout disabled in PSD settings; keep absolute export.");
             if (!configMap.ParticipateInAutoLayout(layer))
                 return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "Layer opted out of auto-layout participation.");
-            if (config.keepAbsoluteInsideParent || renderAsLeaf)
-                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "Leaf or absolute override keeps this node on absolute positioning.");
+            if (renderAsLeaf)
+                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "Leaf nodes keep absolute positioning.");
 
             List<PsdUiToolkitLayoutNode> flowCandidates = GetFlowCandidates(childNodes, bounds, configMap);
             if (flowCandidates.Count < 2)
@@ -251,15 +243,15 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitAutoLayoutGlobalConfig autoLayout = configMap.GetAutoLayoutConfig();
             LayoutScore rowScore = ScoreRow(flowCandidates, autoLayout);
             LayoutScore columnScore = ScoreColumn(flowCandidates, autoLayout);
-            LayoutScore gridScore = ScoreGrid(flowCandidates, autoLayout, config);
-            LayoutAnalysisResult best = SelectBestLayout(rowScore, columnScore, gridScore, config.forceContainer);
+            LayoutScore gridScore = ScoreGrid(flowCandidates, autoLayout);
+            LayoutAnalysisResult best = SelectBestLayout(rowScore, columnScore, gridScore);
             if (best.LayoutType != PsdUiToolkitLayoutType.Absolute)
                 return best;
 
             return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "No high-confidence row, column, or grid pattern was detected; keep absolute export.");
         }
 
-        private static LayoutAnalysisResult SelectBestLayout(LayoutScore rowScore, LayoutScore columnScore, LayoutScore gridScore, bool forceContainer)
+        private static LayoutAnalysisResult SelectBestLayout(LayoutScore rowScore, LayoutScore columnScore, LayoutScore gridScore)
         {
             List<LayoutScore> candidates = new List<LayoutScore>(3);
             if (rowScore.IsCandidate)
@@ -275,9 +267,9 @@ namespace PsdTools.UIToolKit
             candidates.Sort((left, right) => right.Confidence.CompareTo(left.Confidence));
             LayoutScore best = candidates[0];
             float second = candidates.Count > 1 ? candidates[1].Confidence : 0f;
-            if (!forceContainer && best.Confidence < DetectionFloor)
+            if (best.Confidence < DetectionFloor)
                 return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, $"Best layout candidate was {best.LayoutType} at confidence {best.Confidence:0.##}, below the detection floor.");
-            if (!forceContainer && second > 0f && best.Confidence - second < AmbiguityGap)
+            if (second > 0f && best.Confidence - second < AmbiguityGap)
                 return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, $"Layout candidates were ambiguous ({best.LayoutType} {best.Confidence:0.##} vs {candidates[1].LayoutType} {second:0.##}).");
 
             return new LayoutAnalysisResult(best.LayoutType, best.Confidence, best.Summary);
@@ -289,43 +281,34 @@ namespace PsdTools.UIToolKit
             for (int i = 0; i < childNodes.Count; i++)
             {
                 PsdUiToolkitLayoutNode child = childNodes[i];
-                if (ShouldIncludeInFlow(child, parentBounds, configMap))
+                if (IsFlowCandidate(child, parentBounds, configMap))
                     flowCandidates.Add(child);
             }
 
             return flowCandidates;
         }
 
-        private static bool ShouldIncludeInFlow(PsdUiToolkitLayoutNode childNode, PsdUiToolkitLayerBounds parentBounds, PsdUiToolkitLayerConfigMap configMap)
+        private static bool IsFlowCandidate(PsdUiToolkitLayoutNode childNode, PsdUiToolkitLayerBounds parentBounds, PsdUiToolkitLayerConfigMap configMap)
         {
             Layer childLayer = childNode?.SourceLayer;
             if (childLayer == null)
                 return false;
 
-            PsdUiToolkitLayerConfig childConfig = configMap.Get(childLayer);
             if (!configMap.ParticipateInAutoLayout(childLayer))
                 return false;
-            if (!childConfig.includeInFlow || childConfig.keepAbsoluteInsideParent)
-                return false;
-            if (childConfig.forceBackground || childConfig.semanticRole == PsdUiToolkitSemanticRole.Background)
-                return false;
-            if (childConfig.semanticRole == PsdUiToolkitSemanticRole.Overlay)
-                return false;
-            if (IsBackgroundLike(childNode, parentBounds, configMap, childConfig))
+            if (IsBackgroundLike(childNode, parentBounds, configMap))
                 return false;
 
             return true;
         }
 
-        private static bool IsBackgroundLike(PsdUiToolkitLayoutNode childNode, PsdUiToolkitLayerBounds parentBounds, PsdUiToolkitLayerConfigMap configMap, PsdUiToolkitLayerConfig childConfig)
+        private static bool IsBackgroundLike(PsdUiToolkitLayoutNode childNode, PsdUiToolkitLayerBounds parentBounds, PsdUiToolkitLayerConfigMap configMap)
         {
             if (childNode?.SourceLayer == null)
                 return false;
             if (!configMap.GetAutoLayoutConfig().detectBackgroundContainers)
                 return false;
             if (childNode.SourceLayer.Kind == LayerKind.Type)
-                return false;
-            if (childConfig.semanticRole == PsdUiToolkitSemanticRole.Content || childConfig.semanticRole == PsdUiToolkitSemanticRole.Container)
                 return false;
 
             int tolerance = Math.Max(2, configMap.GetAutoLayoutConfig().alignmentTolerance);
@@ -425,7 +408,7 @@ namespace PsdTools.UIToolKit
             return new LayoutScore(PsdUiToolkitLayoutType.Column, confidence, summary);
         }
 
-        private static LayoutScore ScoreGrid(List<PsdUiToolkitLayoutNode> flowCandidates, PsdUiToolkitAutoLayoutGlobalConfig autoLayout, PsdUiToolkitLayerConfig config)
+        private static LayoutScore ScoreGrid(List<PsdUiToolkitLayoutNode> flowCandidates, PsdUiToolkitAutoLayoutGlobalConfig autoLayout)
         {
             if (flowCandidates.Count < 4)
                 return new LayoutScore(PsdUiToolkitLayoutType.Grid, 0f, string.Empty);
@@ -436,7 +419,7 @@ namespace PsdTools.UIToolKit
             if (rows.Count < 2 || columns.Count < 2)
                 return new LayoutScore(PsdUiToolkitLayoutType.Grid, 0f, string.Empty);
 
-            int expectedColumns = config.gridColumnCount > 0 ? config.gridColumnCount : columns.Count;
+            int expectedColumns = columns.Count;
             float occupancy = Clamp01(flowCandidates.Count / (float)Math.Max(1, rows.Count * Math.Max(2, expectedColumns)));
             float sizeScore = ComputeSizeConsistencyScore(flowCandidates);
             float alignmentScore = ComputeGridAlignmentScore(rows, columns, clusterTolerance);
@@ -456,9 +439,9 @@ namespace PsdTools.UIToolKit
             for (int i = 0; i < childNodes.Count; i++)
             {
                 PsdUiToolkitLayoutNode child = childNodes[i];
-                if (IsBackgroundLike(child, parentBounds, configMap, configMap.Get(child.SourceLayer)) || IsForcedBackground(child, configMap))
+                if (IsBackgroundLike(child, parentBounds, configMap))
                     backgroundChildren.Add(child);
-                else if (ShouldIncludeInFlow(child, parentBounds, configMap))
+                else if (IsFlowCandidate(child, parentBounds, configMap))
                     flowChildren.Add(child);
                 else
                     remainingChildren.Add(child);
@@ -466,7 +449,7 @@ namespace PsdTools.UIToolKit
 
             backgroundChildren.Sort((left, right) => left.OriginalIndex.CompareTo(right.OriginalIndex));
             remainingChildren.Sort((left, right) => left.OriginalIndex.CompareTo(right.OriginalIndex));
-            SortFlowChildren(flowChildren, layoutType, configMap);
+            SortFlowChildren(flowChildren, layoutType);
 
             childNodes.Clear();
             childNodes.AddRange(backgroundChildren);
@@ -474,67 +457,23 @@ namespace PsdTools.UIToolKit
             childNodes.AddRange(remainingChildren);
         }
 
-        private static bool IsForcedBackground(PsdUiToolkitLayoutNode child, PsdUiToolkitLayerConfigMap configMap)
-        {
-            if (child?.SourceLayer == null)
-                return false;
-
-            PsdUiToolkitLayerConfig config = configMap.Get(child.SourceLayer);
-            return config.forceBackground || config.semanticRole == PsdUiToolkitSemanticRole.Background;
-        }
-
-        private static void SortFlowChildren(List<PsdUiToolkitLayoutNode> flowChildren, PsdUiToolkitLayoutType layoutType, PsdUiToolkitLayerConfigMap configMap)
+        private static void SortFlowChildren(List<PsdUiToolkitLayoutNode> flowChildren, PsdUiToolkitLayoutType layoutType)
         {
             if (flowChildren.Count <= 1)
                 return;
 
-            List<PsdUiToolkitLayoutNode> geometryOrdered = new List<PsdUiToolkitLayoutNode>(flowChildren);
             switch (layoutType)
             {
                 case PsdUiToolkitLayoutType.Column:
-                    geometryOrdered.Sort(CompareByTopThenLeft);
+                    flowChildren.Sort(CompareByTopThenLeft);
                     break;
                 case PsdUiToolkitLayoutType.Grid:
-                    geometryOrdered.Sort(CompareByTopThenLeft);
+                    flowChildren.Sort(CompareByTopThenLeft);
                     break;
                 default:
-                    geometryOrdered.Sort(CompareByLeftThenTop);
+                    flowChildren.Sort(CompareByLeftThenTop);
                     break;
             }
-
-            Dictionary<int, int> geometryRank = new Dictionary<int, int>();
-            for (int i = 0; i < geometryOrdered.Count; i++)
-            {
-                int? layerId = geometryOrdered[i].SourceLayer?.LayerId;
-                if (layerId.HasValue)
-                    geometryRank[layerId.Value] = i;
-            }
-
-            flowChildren.Sort((left, right) =>
-            {
-                int leftRank = GetEffectiveFlowOrder(left, geometryRank, configMap);
-                int rightRank = GetEffectiveFlowOrder(right, geometryRank, configMap);
-                int compare = leftRank.CompareTo(rightRank);
-                if (compare != 0)
-                    return compare;
-
-                return layoutType == PsdUiToolkitLayoutType.Column || layoutType == PsdUiToolkitLayoutType.Grid
-                    ? CompareByTopThenLeft(left, right)
-                    : CompareByLeftThenTop(left, right);
-            });
-        }
-
-        private static int GetEffectiveFlowOrder(PsdUiToolkitLayoutNode node, Dictionary<int, int> geometryRank, PsdUiToolkitLayerConfigMap configMap)
-        {
-            int? layerId = node?.SourceLayer?.LayerId;
-            int fallbackRank = layerId.HasValue && geometryRank.TryGetValue(layerId.Value, out int rank)
-                ? rank
-                : node?.OriginalIndex ?? 0;
-            if (node?.SourceLayer == null)
-                return fallbackRank;
-
-            PsdUiToolkitLayerConfig config = configMap.Get(node.SourceLayer);
-            return config.orderOverride >= 0 ? config.orderOverride : fallbackRank;
         }
 
         private static float ComputeAlignmentScore(List<PsdUiToolkitLayoutNode> nodes, Func<PsdUiToolkitLayoutNode, float> selector, float tolerance, out float deviation)
