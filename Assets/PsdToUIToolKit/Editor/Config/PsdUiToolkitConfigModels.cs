@@ -56,7 +56,6 @@ namespace PsdTools.UIToolKit
         public int alignmentTolerance;
         public int gapTolerance;
         public bool allowVirtualContainers;
-        public bool allowCrossGroupRegrouping;
         public bool detectBackgroundContainers;
         public int maxNestingDepth;
         public PsdUiToolkitLayoutFallbackMode fallbackMode;
@@ -70,7 +69,6 @@ namespace PsdTools.UIToolKit
             alignmentTolerance = 8,
             gapTolerance = 10,
             allowVirtualContainers = true,
-            allowCrossGroupRegrouping = false,
             detectBackgroundContainers = true,
             maxNestingDepth = 3,
             fallbackMode = PsdUiToolkitLayoutFallbackMode.Absolute,

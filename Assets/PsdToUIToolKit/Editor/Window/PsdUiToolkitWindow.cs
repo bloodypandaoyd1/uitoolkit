@@ -609,15 +609,6 @@ namespace PsdTools.UIToolKit
             });
             _inspectorScroll.Add(virtualContainerToggle);
 
-            Toggle regroupToggle = new Toggle("Allow cross-group regrouping") { value = autoLayout.allowCrossGroupRegrouping };
-            regroupToggle.RegisterValueChangedCallback(evt =>
-            {
-                PsdUiToolkitExportConfigData current = EnsureConfigData();
-                current.autoLayout.allowCrossGroupRegrouping = evt.newValue;
-                PersistConfigAndRebuildInspector();
-            });
-            _inspectorScroll.Add(regroupToggle);
-
             Toggle backgroundToggle = new Toggle("Detect background containers") { value = autoLayout.detectBackgroundContainers };
             backgroundToggle.RegisterValueChangedCallback(evt =>
             {
