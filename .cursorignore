@@ -1,0 +1,97 @@
+﻿# =============================================================================
+# Cursor ignore — Unity project (uitoolkit / PSD → UI Toolkit)
+# Reduces index noise and keeps AI context focused on source code & configs.
+# =============================================================================
+
+# --- Unity generated (also in .gitignore) ---
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+MemoryCaptures/
+Records/
+
+Library/APIUpdater/
+Library/Artifacts/
+Library/Bee/
+Library/PackageCache/
+Library/ScriptAssemblies/
+Library/Search/
+Library/ShaderCache/
+Library/StateCache/
+Library/TempArtifacts/
+
+# --- IDE / OS ---
+.vs/
+.vscode/
+.idea/
+*.sln
+*.csproj
+*.unityproj
+*.sln.docstates
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.opendb
+*.VC.db
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Unity / build artifacts ---
+*.apk
+*.aab
+*.unitypackage
+*.stacktrace
+*.pid
+sysinfo.txt
+
+# --- Binary & large media (not useful for code assistance) ---
+*.psd
+*.psb
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.tga
+*.tif
+*.tiff
+*.bmp
+*.exr
+*.hdr
+*.webp
+*.ico
+*.pdf
+
+# Audio / video / 3D
+*.wav
+*.mp3
+*.ogg
+*.aiff
+*.fbx
+*.obj
+*.blend
+*.dae
+*.3ds
+*.mp4
+*.mov
+*.avi
+
+# Fonts (binary; keep .json font mapping configs indexed)
+*.ttf
+*.otf
+*.woff
+*.woff2
+
+# --- Tool-generated export output (regenerated from PSD) ---
+# Uncomment the next line to also exclude exported UXML:
+# Assets/PsdToUIToolKit/Generated/
+Assets/PsdToUIToolKit/Generated/Images/
+
+# --- Optional: reduce .meta churn (remove if you need GUID/asset wiring in chat) ---
+# *.meta
