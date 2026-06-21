@@ -292,8 +292,14 @@ namespace PsdTools.UIToolKit
             };
 
             PsdUiToolkitDedupConfigData dedupConfig = PsdUiToolkitImageExportConfig.LoadDedup(true);
-            _dedupMaeThreshold = Mathf.Clamp(dedupConfig.maeThreshold, 0f, 1f);
-            _dedupFingerprintSize = Mathf.Clamp(dedupConfig.fingerprintSize, 2, 64);
+            _dedupMaeThreshold = Mathf.Clamp(
+                dedupConfig.maeThreshold,
+                PsdUiToolkitDedupConfigData.MinMaeThreshold,
+                PsdUiToolkitDedupConfigData.MaxMaeThreshold);
+            _dedupFingerprintSize = Mathf.Clamp(
+                dedupConfig.fingerprintSize,
+                PsdUiToolkitDedupConfigData.MinFingerprintSize,
+                PsdUiToolkitDedupConfigData.MaxFingerprintSize);
         }
 
         public PsdUiToolkitRasterExportResult ExportAll()
@@ -953,10 +959,21 @@ namespace PsdTools.UIToolKit
 
         private float[] ComputeFingerprint(Texture2D texture)
         {
+            return ComputeFingerprint(texture, _dedupFingerprintSize);
+        }
+
+        internal static float[] ComputeFingerprint(Texture2D texture, int fingerprintSize)
+        {
+            if (texture == null)
+                throw new ArgumentNullException(nameof(texture));
+
             Color32[] sourcePixels = texture.GetPixels32();
             (Color32[] pixels, int width, int height) = TrimTransparentBorders(sourcePixels, texture.width, texture.height);
 
-            int size = _dedupFingerprintSize;
+            int size = Mathf.Clamp(
+                fingerprintSize,
+                PsdUiToolkitDedupConfigData.MinFingerprintSize,
+                PsdUiToolkitDedupConfigData.MaxFingerprintSize);
             float[] fingerprint = new float[size * size * 4];
             for (int y = 0; y < size; y++)
             {
@@ -979,10 +996,22 @@ namespace PsdTools.UIToolKit
 
         private bool FingerprintsMatchLocal(float[] left, float[] right)
         {
+            return CalculateFingerprintMae(left, right) <= _dedupMaeThreshold;
+        }
+
+        internal static float CalculateFingerprintMae(float[] left, float[] right)
+        {
+            if (left == null)
+                throw new ArgumentNullException(nameof(left));
+            if (right == null)
+                throw new ArgumentNullException(nameof(right));
+            if (left.Length == 0 || left.Length != right.Length)
+                throw new ArgumentException("Fingerprint arrays must be non-empty and have the same length.");
+
             float sumAbsDiff = 0f;
             for (int i = 0; i < left.Length; i++)
                 sumAbsDiff += Mathf.Abs(left[i] - right[i]);
-            return sumAbsDiff / left.Length <= _dedupMaeThreshold;
+            return sumAbsDiff / left.Length;
         }
 
         private static Color BilinearSamplePremultiplied(Color32[] pixels, int width, int height, float x, float y)
@@ -1491,12 +1520,13 @@ namespace PsdTools.UIToolKit
                 PsdUiToolkitConfigStore.ApplyToPsd(psd, config);
 
                 PsdUiToolkitLayerConfigMap configMap = new PsdUiToolkitLayerConfigMap(config);
+                PsdUiToolkitFontMappingLookup fontMapping = PsdUiToolkitFontMappingConfig.PrepareForExport(psd);
                 PsdUiToolkitRasterExporter rasterExporter = new PsdUiToolkitRasterExporter(psd, configMap, imageFolderAssetPath, autoImageNaming);
                 PsdUiToolkitRasterExportResult rasterResult = rasterExporter.ExportAll();
                 PsdUiToolkitLayoutTree layoutTree = configMap.GetAutoLayoutConfig().rebuildLayoutTree
                     ? PsdUiToolkitLayoutTreeRebuilder.Build(psd, configMap, rasterResult, psdName)
                     : PsdUiToolkitAutoLayoutAnalyzer.Analyze(psd, configMap, rasterResult, psdName);
-                PsdUiToolkitUxmlWriter.Write(layoutTree, configMap, rasterResult, uxmlAssetPath);
+                PsdUiToolkitUxmlWriter.Write(layoutTree, configMap, rasterResult, fontMapping, uxmlAssetPath);
                 AssetDatabase.Refresh();
 
                 return new PsdUiToolkitExportArtifacts

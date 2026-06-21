@@ -7,18 +7,46 @@ namespace PsdTools.UIToolKit
     [Serializable]
     internal sealed class PsdUiToolkitNineSliceConfigData
     {
+        public const int DefaultBorderInset = 2;
+        public const int DefaultPixelThreshold = 10;
+        public const int DefaultMinCenterCols = 10;
+        public const int DefaultMinCenterRows = 10;
+        public const int DefaultMinSameZone = 15;
+
         public int borderInset = 2;
         public int pixelThreshold = 10;
         public int minCenterCols = 10;
         public int minCenterRows = 10;
         public int minSameZone = 15;
+
+        public void Sanitize()
+        {
+            borderInset = Mathf.Max(0, borderInset);
+            pixelThreshold = Mathf.Clamp(pixelThreshold, 0, 255);
+            minCenterCols = Mathf.Clamp(minCenterCols, 1, 4096);
+            minCenterRows = Mathf.Clamp(minCenterRows, 1, 4096);
+            minSameZone = Mathf.Clamp(minSameZone, 1, 4096);
+        }
     }
 
     [Serializable]
     internal sealed class PsdUiToolkitDedupConfigData
     {
+        public const float DefaultMaeThreshold = 0.04f;
+        public const float MinMaeThreshold = 0.001f;
+        public const float MaxMaeThreshold = 0.5f;
+        public const int DefaultFingerprintSize = 8;
+        public const int MinFingerprintSize = 4;
+        public const int MaxFingerprintSize = 32;
+
         public float maeThreshold = 0.04f;
         public int fingerprintSize = 8;
+
+        public void Sanitize()
+        {
+            maeThreshold = Mathf.Clamp(maeThreshold, MinMaeThreshold, MaxMaeThreshold);
+            fingerprintSize = Mathf.Clamp(fingerprintSize, MinFingerprintSize, MaxFingerprintSize);
+        }
     }
 
     [Serializable]
@@ -47,6 +75,7 @@ namespace PsdTools.UIToolKit
                 return _nineSliceCache;
 
             _nineSliceCache = LoadJsonOrDefault(NineSliceConfigPath, new PsdUiToolkitNineSliceConfigData());
+            _nineSliceCache.Sanitize();
             return _nineSliceCache;
         }
 
@@ -56,7 +85,24 @@ namespace PsdTools.UIToolKit
                 return _dedupCache;
 
             _dedupCache = LoadJsonOrDefault(DedupConfigPath, new PsdUiToolkitDedupConfigData());
+            _dedupCache.Sanitize();
             return _dedupCache;
+        }
+
+        public static void SaveNineSlice(PsdUiToolkitNineSliceConfigData data)
+        {
+            data ??= new PsdUiToolkitNineSliceConfigData();
+            data.Sanitize();
+            SaveJson(NineSliceConfigPath, data);
+            _nineSliceCache = data;
+        }
+
+        public static void SaveDedup(PsdUiToolkitDedupConfigData data)
+        {
+            data ??= new PsdUiToolkitDedupConfigData();
+            data.Sanitize();
+            SaveJson(DedupConfigPath, data);
+            _dedupCache = data;
         }
 
         public static PsdUiToolkitCommonDirectoriesData LoadCommonDirectories(bool forceReload = false)
@@ -82,6 +128,22 @@ namespace PsdTools.UIToolKit
             {
                 Debug.LogWarning($"[PsdUiToolkitImageExportConfig] Failed to load {Path.GetFileName(path)}: {ex.Message}");
                 return fallback;
+            }
+        }
+
+        private static void SaveJson<T>(string path, T data) where T : class
+        {
+            try
+            {
+                string directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                    Directory.CreateDirectory(directory);
+
+                File.WriteAllText(path, JsonUtility.ToJson(data, true));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[PsdUiToolkitImageExportConfig] Failed to save {Path.GetFileName(path)}: {ex.Message}");
             }
         }
     }

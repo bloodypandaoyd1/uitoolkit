@@ -58,7 +58,12 @@ namespace PsdTools.UIToolKit
             }
         }
 
-        public static void Write(PsdUiToolkitLayoutTree layoutTree, PsdUiToolkitLayerConfigMap configMap, PsdUiToolkitRasterExportResult rasterResult, string outputAssetPath)
+        public static void Write(
+            PsdUiToolkitLayoutTree layoutTree,
+            PsdUiToolkitLayerConfigMap configMap,
+            PsdUiToolkitRasterExportResult rasterResult,
+            PsdUiToolkitFontMappingLookup fontMapping,
+            string outputAssetPath)
         {
             if (layoutTree == null)
                 throw new ArgumentNullException(nameof(layoutTree));
@@ -76,7 +81,7 @@ namespace PsdTools.UIToolKit
 
             foreach (PsdUiToolkitLayoutNode child in layoutTree.Children)
             {
-                AppendLayoutNode(builder, child, 2, 0, 0, configMap, rasterResult, FlowChildPlacement.Absolute);
+                AppendLayoutNode(builder, child, 2, 0, 0, configMap, rasterResult, fontMapping, FlowChildPlacement.Absolute);
             }
 
             builder.AppendLine("  </ui:VisualElement>");
@@ -95,6 +100,7 @@ namespace PsdTools.UIToolKit
             int parentTop,
             PsdUiToolkitLayerConfigMap configMap,
             PsdUiToolkitRasterExportResult rasterResult,
+            PsdUiToolkitFontMappingLookup fontMapping,
             FlowChildPlacement placement)
         {
             if (node == null)
@@ -120,7 +126,7 @@ namespace PsdTools.UIToolKit
                 ? (string.IsNullOrEmpty(node.DisplayName) ? $"Auto_{node.OriginalIndex}" : node.DisplayName)
                 : (string.IsNullOrEmpty(layer.Name) ? $"Layer_{layer.LayerId.Value}" : layer.Name);
             FlowContainerPlan flowPlan = BuildFlowContainerPlan(node, configMap);
-            string style = BuildStyle(node, layer, bounds, left, top, configMap, rasterInfo, placement, flowPlan);
+            string style = BuildStyle(node, layer, bounds, left, top, configMap, rasterInfo, fontMapping, placement, flowPlan);
 
             if (!isSynthetic && layer.Kind == LayerKind.Type)
             {
@@ -145,7 +151,7 @@ namespace PsdTools.UIToolKit
 
             if (flowPlan.UseFlow && flowPlan.LayoutType == PsdUiToolkitLayoutType.Grid)
             {
-                AppendGridChildren(builder, node, flowPlan, indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult);
+                AppendGridChildren(builder, node, flowPlan, indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping);
             }
             else if (flowPlan.UseFlow)
             {
@@ -155,13 +161,13 @@ namespace PsdTools.UIToolKit
                     FlowChildPlacement childPlacement = flowPlan.Placements.TryGetValue(child, out FlowChildPlacement resolvedPlacement)
                         ? resolvedPlacement
                         : FlowChildPlacement.Absolute;
-                    AppendLayoutNode(builder, child, indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, childPlacement);
+                    AppendLayoutNode(builder, child, indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, childPlacement);
                 }
             }
             else
             {
                 for (int i = 0; i < node.Children.Count; i++)
-                    AppendLayoutNode(builder, node.Children[i], indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, FlowChildPlacement.Absolute);
+                    AppendLayoutNode(builder, node.Children[i], indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, FlowChildPlacement.Absolute);
             }
 
             builder.Append(indent);
@@ -176,6 +182,7 @@ namespace PsdTools.UIToolKit
             int top,
             PsdUiToolkitLayerConfigMap configMap,
             PsdUiToolkitRasterAssetInfo rasterInfo,
+            PsdUiToolkitFontMappingLookup fontMapping,
             FlowChildPlacement placement,
             FlowContainerPlan flowPlan)
         {
@@ -216,6 +223,9 @@ namespace PsdTools.UIToolKit
                 TypeLayer typeLayer = (TypeLayer)layer;
                 style.AppendFormat(CultureInfo.InvariantCulture, " font-size: {0:0.##}px;", typeLayer.EffectiveFontSize);
                 style.Append(" white-space: normal; -unity-text-align: upper-left;");
+                string fontUri = fontMapping?.ResolveStyleUri(typeLayer.PsdFontName);
+                if (!string.IsNullOrEmpty(fontUri))
+                    style.AppendFormat(CultureInfo.InvariantCulture, " -unity-font-definition: url('{0}');", fontUri);
                 if (typeLayer.FillColor != null && typeLayer.FillColor.Length >= 4)
                 {
                     int red = Mathf.Clamp(Mathf.RoundToInt(typeLayer.FillColor[1] * 255f), 0, 255);
@@ -513,7 +523,8 @@ namespace PsdTools.UIToolKit
             int parentLeft,
             int parentTop,
             PsdUiToolkitLayerConfigMap configMap,
-            PsdUiToolkitRasterExportResult rasterResult)
+            PsdUiToolkitRasterExportResult rasterResult,
+            PsdUiToolkitFontMappingLookup fontMapping)
         {
             HashSet<PsdUiToolkitLayoutNode> flowChildren = new HashSet<PsdUiToolkitLayoutNode>(flowPlan.FlowChildren);
             bool rowsWritten = false;
@@ -525,20 +536,20 @@ namespace PsdTools.UIToolKit
                     if (!rowsWritten)
                     {
                         for (int rowIndex = 0; rowIndex < flowPlan.GridRows.Count; rowIndex++)
-                            AppendSyntheticGridRow(builder, node, flowPlan, flowPlan.GridRows[rowIndex], rowIndex, indentLevel, parentLeft, parentTop, configMap, rasterResult);
+                            AppendSyntheticGridRow(builder, node, flowPlan, flowPlan.GridRows[rowIndex], rowIndex, indentLevel, parentLeft, parentTop, configMap, rasterResult, fontMapping);
                         rowsWritten = true;
                     }
 
                     continue;
                 }
 
-                AppendLayoutNode(builder, child, indentLevel, node.Bounds.Left, node.Bounds.Top, configMap, rasterResult, FlowChildPlacement.Absolute);
+                AppendLayoutNode(builder, child, indentLevel, node.Bounds.Left, node.Bounds.Top, configMap, rasterResult, fontMapping, FlowChildPlacement.Absolute);
             }
 
             if (!rowsWritten)
             {
                 for (int rowIndex = 0; rowIndex < flowPlan.GridRows.Count; rowIndex++)
-                    AppendSyntheticGridRow(builder, node, flowPlan, flowPlan.GridRows[rowIndex], rowIndex, indentLevel, parentLeft, parentTop, configMap, rasterResult);
+                    AppendSyntheticGridRow(builder, node, flowPlan, flowPlan.GridRows[rowIndex], rowIndex, indentLevel, parentLeft, parentTop, configMap, rasterResult, fontMapping);
             }
         }
 
@@ -552,7 +563,8 @@ namespace PsdTools.UIToolKit
             int parentLeft,
             int parentTop,
             PsdUiToolkitLayerConfigMap configMap,
-            PsdUiToolkitRasterExportResult rasterResult)
+            PsdUiToolkitRasterExportResult rasterResult,
+            PsdUiToolkitFontMappingLookup fontMapping)
         {
             string indent = new string(' ', indentLevel * 2);
             builder.Append(indent);
@@ -565,7 +577,7 @@ namespace PsdTools.UIToolKit
                 FlowChildPlacement placement = rowPlan.Placements.TryGetValue(child, out FlowChildPlacement resolvedPlacement)
                     ? resolvedPlacement
                     : FlowChildPlacement.Absolute;
-                AppendLayoutNode(builder, child, indentLevel + 1, parentNode.Bounds.Left, parentNode.Bounds.Top, configMap, rasterResult, placement);
+                AppendLayoutNode(builder, child, indentLevel + 1, parentNode.Bounds.Left, parentNode.Bounds.Top, configMap, rasterResult, fontMapping, placement);
             }
 
             builder.Append(indent);
