@@ -114,6 +114,13 @@ namespace PsdTools.UIToolKit
             return _commonDirectoriesCache;
         }
 
+        public static void SaveCommonDirectories(PsdUiToolkitCommonDirectoriesData data)
+        {
+            data ??= new PsdUiToolkitCommonDirectoriesData();
+            SaveJson(CommonDirectoriesConfigPath, data);
+            _commonDirectoriesCache = data;
+        }
+
         private static T LoadJsonOrDefault<T>(string path, T fallback) where T : class
         {
             if (!File.Exists(path))
