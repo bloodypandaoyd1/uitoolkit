@@ -131,8 +131,44 @@ namespace PsdTools.UIToolKit
             if (!isSynthetic && layer.Kind == LayerKind.Type)
             {
                 TypeLayer typeLayer = (TypeLayer)layer;
+                string rawText = typeLayer.Text;
+
+                if (PsdUiToolkitTextEffectsHelper.TryGetTextGradientCornersFromLayer(layer, out Color32 cTL, out Color32 cTR, out Color32 cBL, out Color32 cBR))
+                {
+                    string folder = EnsureAndGetGradientFolder();
+                    string layerNameSanitized = PsdUiToolkitAssetPathUtility.SanitizeFileName(layer.Name);
+                    string assetName = $"Gradient_{layer.LayerId}_{layerNameSanitized}";
+                    string assetPath = $"{folder}/{assetName}.asset";
+                    
+                    UnityEngine.TextCore.Text.TextColorGradient gradientAsset = UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.TextCore.Text.TextColorGradient>(assetPath);
+                    if (gradientAsset == null)
+                    {
+                        gradientAsset = UnityEngine.ScriptableObject.CreateInstance<UnityEngine.TextCore.Text.TextColorGradient>();
+                        gradientAsset.colorMode = UnityEngine.TextCore.Text.ColorGradientMode.FourCornersGradient;
+                        gradientAsset.topLeft = cTL;
+                        gradientAsset.topRight = cTR;
+                        gradientAsset.bottomLeft = cBL;
+                        gradientAsset.bottomRight = cBR;
+                        UnityEditor.AssetDatabase.CreateAsset(gradientAsset, assetPath);
+                    }
+                    else
+                    {
+                        gradientAsset.colorMode = UnityEngine.TextCore.Text.ColorGradientMode.FourCornersGradient;
+                        gradientAsset.topLeft = cTL;
+                        gradientAsset.topRight = cTR;
+                        gradientAsset.bottomLeft = cBL;
+                        gradientAsset.bottomRight = cBR;
+                        UnityEditor.EditorUtility.SetDirty(gradientAsset);
+                    }
+                    UnityEditor.AssetDatabase.SaveAssets();
+
+                    rawText = $"<gradient=\"{assetName}\">{rawText}</gradient>";
+                }
+
+                string richTextAttr = rawText.Contains("<gradient=") ? " enable-rich-text=\"true\"" : "";
+
                 builder.Append(indent);
-                builder.Append($"<ui:Label name=\"{EscapeAttribute(elementName)}\" text=\"{EscapeAttribute(typeLayer.Text)}\" style=\"{EscapeAttribute(style)}\" />");
+                builder.Append($"<ui:Label name=\"{EscapeAttribute(elementName)}\" text=\"{EscapeAttribute(rawText)}\"{richTextAttr} style=\"{EscapeAttribute(style)}\" />");
                 builder.AppendLine();
                 return;
             }
@@ -222,7 +258,7 @@ namespace PsdTools.UIToolKit
             {
                 TypeLayer typeLayer = (TypeLayer)layer;
                 style.AppendFormat(CultureInfo.InvariantCulture, " font-size: {0:0.##}px;", typeLayer.EffectiveFontSize);
-                style.Append(" white-space: normal; -unity-text-align: upper-left;");
+                style.Append(" white-space: normal; -unity-text-align: middle-center;");
                 string fontUri = fontMapping?.ResolveStyleUri(typeLayer.PsdFontName);
                 if (!string.IsNullOrEmpty(fontUri))
                     style.AppendFormat(CultureInfo.InvariantCulture, " -unity-font-definition: url('{0}');", fontUri);
@@ -234,6 +270,16 @@ namespace PsdTools.UIToolKit
                     float alpha = Mathf.Clamp01(typeLayer.FillColor[0]);
                     style.AppendFormat(CultureInfo.InvariantCulture, " color: rgba({0}, {1}, {2}, {3:0.###});", red, green, blue, alpha);
                 }
+
+                if (PsdUiToolkitTextEffectsHelper.TryGetStrokeEffect(layer, out Color strokeColor, out float strokeSize))
+                {
+                    int sr = Mathf.Clamp(Mathf.RoundToInt(strokeColor.r * 255f), 0, 255);
+                    int sg = Mathf.Clamp(Mathf.RoundToInt(strokeColor.g * 255f), 0, 255);
+                    int sb = Mathf.Clamp(Mathf.RoundToInt(strokeColor.b * 255f), 0, 255);
+                    style.AppendFormat(CultureInfo.InvariantCulture, " -unity-text-outline-width: {0:0.##}px;", strokeSize);
+                    style.AppendFormat(CultureInfo.InvariantCulture, " -unity-text-outline-color: rgba({0}, {1}, {2}, {3:0.###});", sr, sg, sb, strokeColor.a);
+                }
+
                 return style.ToString().Trim();
             }
 
@@ -620,6 +666,25 @@ namespace PsdTools.UIToolKit
         private static string EscapeAttribute(string value)
         {
             return SecurityElement.Escape(value ?? string.Empty) ?? string.Empty;
+        }
+
+
+        private static string EnsureAndGetGradientFolder()
+        {
+            string presetPath = "Assets/Resources/Text Color Gradients";
+            var folderList = presetPath.Split(new[] { '/', '\\' }, System.StringSplitOptions.RemoveEmptyEntries);
+
+            string currentPath = folderList[0];
+            for (int i = 1; i < folderList.Length; i++)
+            {
+                string nextPath = currentPath + "/" + folderList[i];
+                if (!UnityEditor.AssetDatabase.IsValidFolder(nextPath))
+                {
+                    UnityEditor.AssetDatabase.CreateFolder(currentPath, folderList[i]);
+                }
+                currentPath = nextPath;
+            }
+            return currentPath;
         }
     }
 }
