@@ -258,6 +258,7 @@ namespace PsdTools.UIToolKit
             if (layer.Kind == LayerKind.Type)
             {
                 TypeLayer typeLayer = (TypeLayer)layer;
+                style.Append(" margin: 0; padding: 0;");
                 style.AppendFormat(CultureInfo.InvariantCulture, " font-size: {0:0.##}px;", typeLayer.EffectiveFontSize);
                 string text = typeLayer.Text;
                 bool hasExplicitLineBreak = text.IndexOf('\r') >= 0
