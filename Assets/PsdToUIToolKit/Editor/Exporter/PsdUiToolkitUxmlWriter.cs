@@ -286,6 +286,16 @@ namespace PsdTools.UIToolKit
                     style.AppendFormat(CultureInfo.InvariantCulture, " -unity-text-outline-color: rgba({0}, {1}, {2}, {3:0.###});", sr, sg, sb, strokeColor.a);
                 }
 
+                if (PsdUiToolkitTextEffectsHelper.TryGetDropShadowEffect(layer, out Color shadowColor, out Vector2 shadowOffset, out float blurRadius))
+                {
+                    int sr = Mathf.Clamp(Mathf.RoundToInt(shadowColor.r * 255f), 0, 255);
+                    int sg = Mathf.Clamp(Mathf.RoundToInt(shadowColor.g * 255f), 0, 255);
+                    int sb = Mathf.Clamp(Mathf.RoundToInt(shadowColor.b * 255f), 0, 255);
+                    style.AppendFormat(CultureInfo.InvariantCulture,
+                        " text-shadow: {0:0.###}px {1:0.###}px {2:0.###}px rgba({3}, {4}, {5}, {6:0.###});",
+                        shadowOffset.x, shadowOffset.y, blurRadius, sr, sg, sb, shadowColor.a);
+                }
+
                 return style.ToString().Trim();
             }
 

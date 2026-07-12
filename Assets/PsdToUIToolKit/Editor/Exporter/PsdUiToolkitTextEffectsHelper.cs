@@ -92,6 +92,68 @@ namespace PsdTools.UIToolKit
             return false;
         }
 
+        public static bool TryGetDropShadowEffect(Layer layer, out Color shadowColor, out Vector2 shadowOffset, out float blurRadius)
+        {
+            shadowColor = new Color(0f, 0f, 0f, 0.75f);
+            shadowOffset = Vector2.zero;
+            blurRadius = 0f;
+            var blocks = layer.TaggedBlocks;
+            if (blocks == null) return false;
+
+            byte[] data = blocks.GetData(PsdTools.Constants.Tag.OBJECT_BASED_EFFECTS_LAYER1);
+            if (data == null)
+                data = blocks.GetData(PsdTools.Constants.Tag.OBJECT_BASED_EFFECTS_LAYER2);
+            if (data == null) return false;
+
+            int drshPos = FindPattern(data, "DrSh");
+            if (drshPos < 0) return false;
+
+            int nextEffect = data.Length;
+            string[] effectKeys = { "IrSh", "OrGl", "IrGl", "ebbl", "SoFi", "FrFX", "patternFill", "GrFl" };
+            foreach (string key in effectKeys)
+            {
+                int pos = FindPattern(data, key, drshPos + 4);
+                if (pos > drshPos && pos < nextEffect)
+                    nextEffect = pos;
+            }
+
+            int enabPos = FindPattern(data, "enab", drshPos);
+            if (enabPos >= 0 && enabPos < drshPos + 200 && enabPos < nextEffect)
+            {
+                int boolPos = FindPattern(data, "bool", enabPos + 4);
+                if (boolPos >= 0 && boolPos < enabPos + 20 && boolPos + 5 <= data.Length && data[boolPos + 4] == 0)
+                    return false;
+            }
+
+            float distance = ReadUnitFloat(data, "Dstn", drshPos, nextEffect, 5f);
+            float angle = ReadUnitFloat(data, "lagl", drshPos, nextEffect, 120f);
+            blurRadius = Mathf.Max(0f, ReadUnitFloat(data, "blur", drshPos, nextEffect, 0f));
+
+            float radians = angle * Mathf.Deg2Rad;
+            shadowOffset = new Vector2(distance * Mathf.Cos(radians), distance * Mathf.Sin(radians));
+
+            float opacity = 0.75f;
+            int opctPos = FindPattern(data, "Opct", drshPos);
+            if (opctPos >= 0 && opctPos < nextEffect)
+            {
+                int untfPos = FindPattern(data, "UntF", opctPos + 4);
+                if (untfPos >= 0 && untfPos < opctPos + 20)
+                {
+                    int prcPos = FindPattern(data, "#Prc", untfPos + 4);
+                    if (prcPos >= 0 && prcPos < untfPos + 12 && prcPos + 12 <= data.Length)
+                        opacity = Mathf.Clamp01((float)ReadBigEndianDouble(data, prcPos + 4) / 100f);
+                }
+            }
+
+            int clrPos = FindPattern(data, "Clr ", drshPos);
+            if (clrPos >= 0 && clrPos < nextEffect && TryReadRGBFromRawBytes(data, clrPos, out byte r, out byte g, out byte b))
+                shadowColor = new Color(r / 255f, g / 255f, b / 255f, opacity);
+            else
+                shadowColor = new Color(0f, 0f, 0f, opacity);
+
+            return true;
+        }
+
         public static bool TryGetTextGradientCornersFromLayer(Layer layer, out Color32 topLeft, out Color32 topRight, out Color32 bottomLeft, out Color32 bottomRight)
         {
             topLeft = topRight = bottomLeft = bottomRight = default;
@@ -269,6 +331,19 @@ namespace PsdTools.UIToolKit
             if (System.BitConverter.IsLittleEndian)
                 System.Array.Reverse(temp);
             return System.BitConverter.ToDouble(temp, 0);
+        }
+
+        private static float ReadUnitFloat(byte[] data, string key, int effectStart, int effectEnd, float fallback)
+        {
+            int keyPos = FindPattern(data, key, effectStart);
+            if (keyPos < effectStart || keyPos >= effectEnd)
+                return fallback;
+
+            int untfPos = FindPattern(data, "UntF", keyPos + 4);
+            if (untfPos < 0 || untfPos >= effectEnd || untfPos >= keyPos + 20 || untfPos + 16 > data.Length)
+                return fallback;
+
+            return (float)ReadBigEndianDouble(data, untfPos + 8);
         }
 
         private static int ReadBigEndianInt32(byte[] data, int offset)
