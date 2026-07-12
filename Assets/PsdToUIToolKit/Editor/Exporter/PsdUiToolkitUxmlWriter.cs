@@ -131,7 +131,7 @@ namespace PsdTools.UIToolKit
             if (!isSynthetic && layer.Kind == LayerKind.Type)
             {
                 TypeLayer typeLayer = (TypeLayer)layer;
-                string rawText = typeLayer.Text;
+                string rawText = NormalizeExplicitLineBreaks(typeLayer.Text, out bool hasExplicitLineBreak);
 
                 if (PsdUiToolkitTextEffectsHelper.TryGetTextGradientCornersFromLayer(layer, out Color32 cTL, out Color32 cTR, out Color32 cBL, out Color32 cBR))
                 {
@@ -166,7 +166,9 @@ namespace PsdTools.UIToolKit
                     rawText = $"<color=white><gradient=\"{assetName}\">{rawText}</gradient></color>";
                 }
 
-                string richTextAttr = rawText.Contains("<gradient=") ? " enable-rich-text=\"true\"" : "";
+                string richTextAttr = hasExplicitLineBreak || rawText.Contains("<gradient=")
+                    ? " enable-rich-text=\"true\""
+                    : "";
 
                 builder.Append(indent);
                 builder.Append($"<ui:Label name=\"{EscapeAttribute(elementName)}\" text=\"{EscapeAttribute(rawText)}\"{richTextAttr} style=\"{EscapeAttribute(style)}\" />");
@@ -260,12 +262,7 @@ namespace PsdTools.UIToolKit
                 TypeLayer typeLayer = (TypeLayer)layer;
                 style.Append(" margin: 0; padding: 0;");
                 style.AppendFormat(CultureInfo.InvariantCulture, " font-size: {0:0.##}px;", typeLayer.EffectiveFontSize);
-                string text = typeLayer.Text;
-                bool hasExplicitLineBreak = text.IndexOf('\r') >= 0
-                    || text.IndexOf('\n') >= 0
-                    || text.IndexOf('\u2028') >= 0
-                    || text.IndexOf('\u2029') >= 0;
-                style.Append(hasExplicitLineBreak ? " white-space: normal;" : " white-space: nowrap;");
+                style.Append(" white-space: nowrap;");
                 style.Append(" -unity-text-align: middle-center;");
                 string fontUri = fontMapping?.ResolveStyleUri(typeLayer.PsdFontName);
                 if (!string.IsNullOrEmpty(fontUri))
@@ -306,6 +303,23 @@ namespace PsdTools.UIToolKit
             }
 
             return style.ToString().Trim();
+        }
+
+        private static string NormalizeExplicitLineBreaks(string text, out bool hasExplicitLineBreak)
+        {
+            string value = text ?? string.Empty;
+            hasExplicitLineBreak = value.IndexOf('\r') >= 0
+                || value.IndexOf('\n') >= 0
+                || value.IndexOf('\u2028') >= 0
+                || value.IndexOf('\u2029') >= 0;
+            if (!hasExplicitLineBreak)
+                return value;
+
+            return value.Replace("\r\n", "<br>")
+                .Replace("\r", "<br>")
+                .Replace("\n", "<br>")
+                .Replace("\u2028", "<br>")
+                .Replace("\u2029", "<br>");
         }
 
         private static void AppendFlowContainerStyle(StringBuilder style, FlowContainerPlan flowPlan)
