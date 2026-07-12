@@ -259,7 +259,13 @@ namespace PsdTools.UIToolKit
             {
                 TypeLayer typeLayer = (TypeLayer)layer;
                 style.AppendFormat(CultureInfo.InvariantCulture, " font-size: {0:0.##}px;", typeLayer.EffectiveFontSize);
-                style.Append(" white-space: normal; -unity-text-align: middle-center;");
+                string text = typeLayer.Text;
+                bool hasExplicitLineBreak = text.IndexOf('\r') >= 0
+                    || text.IndexOf('\n') >= 0
+                    || text.IndexOf('\u2028') >= 0
+                    || text.IndexOf('\u2029') >= 0;
+                style.Append(hasExplicitLineBreak ? " white-space: normal;" : " white-space: nowrap;");
+                style.Append(" -unity-text-align: middle-center;");
                 string fontUri = fontMapping?.ResolveStyleUri(typeLayer.PsdFontName);
                 if (!string.IsNullOrEmpty(fontUri))
                     style.AppendFormat(CultureInfo.InvariantCulture, " -unity-font-definition: url('{0}');", fontUri);

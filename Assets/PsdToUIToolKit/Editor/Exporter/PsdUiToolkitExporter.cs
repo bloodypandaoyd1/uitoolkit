@@ -122,20 +122,6 @@ namespace PsdTools.UIToolKit
                 EnsureAssetDirectoryExists(directory);
         }
 
-        public static void DeleteAssetFolderIfExists(string assetFolderPath)
-        {
-            string normalized = NormalizeAssetsPath(assetFolderPath);
-            if (AssetDatabase.IsValidFolder(normalized))
-            {
-                AssetDatabase.DeleteAsset(normalized);
-                return;
-            }
-
-            string diskPath = GetDiskPath(normalized);
-            if (Directory.Exists(diskPath))
-                Directory.Delete(diskPath, true);
-        }
-
         public static string BuildProjectDatabaseUri(Object asset)
         {
             if (asset == null)
@@ -1496,6 +1482,44 @@ namespace PsdTools.UIToolKit
 
     public static class PsdUiToolkitExporter
     {
+        private static void DeleteStaleGeneratedImages(string imageFolderAssetPath, PsdUiToolkitRasterExportResult rasterResult)
+        {
+            HashSet<string> currentAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (PsdUiToolkitRasterAssetInfo assetInfo in rasterResult.AssetsByLayerId.Values)
+            {
+                if (assetInfo != null && !string.IsNullOrEmpty(assetInfo.AssetPath))
+                    currentAssetPaths.Add(PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(assetInfo.AssetPath));
+            }
+
+            string diskFolder = PsdUiToolkitAssetPathUtility.GetDiskPath(imageFolderAssetPath);
+            if (!Directory.Exists(diskFolder))
+                return;
+
+            List<string> staleAssetPaths = new List<string>();
+            foreach (string diskPath in Directory.EnumerateFiles(diskFolder, "*.png", SearchOption.TopDirectoryOnly))
+            {
+                if (PsdUiToolkitAssetPathUtility.TryConvertDiskPathToAssetPath(diskPath, out string assetPath)
+                    && !currentAssetPaths.Contains(PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(assetPath)))
+                {
+                    staleAssetPaths.Add(assetPath);
+                }
+            }
+
+            if (staleAssetPaths.Count == 0)
+                return;
+
+            AssetDatabase.StartAssetEditing();
+            try
+            {
+                foreach (string staleAssetPath in staleAssetPaths)
+                    AssetDatabase.DeleteAsset(staleAssetPath);
+            }
+            finally
+            {
+                AssetDatabase.StopAssetEditing();
+            }
+        }
+
         public static PsdUiToolkitExportArtifacts Export(string psdPath, string imageExportRoot, string uxmlExportRoot, bool autoImageNaming = true)
         {
             if (string.IsNullOrEmpty(psdPath))
@@ -1507,7 +1531,6 @@ namespace PsdTools.UIToolKit
             string imageFolderAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(imageRoot, psdName);
             string uxmlAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, psdName + ".uxml");
 
-            PsdUiToolkitAssetPathUtility.DeleteAssetFolderIfExists(imageFolderAssetPath);
             PsdUiToolkitAssetPathUtility.EnsureAssetDirectoryExists(imageRoot);
             PsdUiToolkitAssetPathUtility.EnsureAssetDirectoryExists(imageFolderAssetPath);
             PsdUiToolkitAssetPathUtility.EnsureParentDirectoryForFile(uxmlAssetPath);
@@ -1527,6 +1550,7 @@ namespace PsdTools.UIToolKit
                     ? PsdUiToolkitLayoutTreeRebuilder.Build(psd, configMap, rasterResult, psdName)
                     : PsdUiToolkitAutoLayoutAnalyzer.Analyze(psd, configMap, rasterResult, psdName);
                 PsdUiToolkitUxmlWriter.Write(layoutTree, configMap, rasterResult, fontMapping, uxmlAssetPath);
+                DeleteStaleGeneratedImages(imageFolderAssetPath, rasterResult);
                 AssetDatabase.Refresh();
 
                 return new PsdUiToolkitExportArtifacts
