@@ -162,7 +162,8 @@ namespace PsdTools.UIToolKit
                     }
                     UnityEditor.AssetDatabase.SaveAssets();
 
-                    rawText = $"<gradient=\"{assetName}\">{rawText}</gradient>";
+                    // UI Toolkit drops rich-text gradients when an outline is set unless the vertex color is reset inline (UUM-86168).
+                    rawText = $"<color=white><gradient=\"{assetName}\">{rawText}</gradient></color>";
                 }
 
                 string richTextAttr = rawText.Contains("<gradient=") ? " enable-rich-text=\"true\"" : "";
