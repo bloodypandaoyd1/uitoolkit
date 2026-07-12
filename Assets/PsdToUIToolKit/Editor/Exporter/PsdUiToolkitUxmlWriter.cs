@@ -277,7 +277,8 @@ namespace PsdTools.UIToolKit
                     int sr = Mathf.Clamp(Mathf.RoundToInt(strokeColor.r * 255f), 0, 255);
                     int sg = Mathf.Clamp(Mathf.RoundToInt(strokeColor.g * 255f), 0, 255);
                     int sb = Mathf.Clamp(Mathf.RoundToInt(strokeColor.b * 255f), 0, 255);
-                    style.AppendFormat(CultureInfo.InvariantCulture, " -unity-text-outline-width: {0:0.##}px;", strokeSize);
+                    float outlineWidth = Mathf.Clamp01(strokeSize / Mathf.Max(1f, typeLayer.EffectiveFontSize) * 2f);
+                    style.AppendFormat(CultureInfo.InvariantCulture, " -unity-text-outline-width: {0:0.###}px;", outlineWidth);
                     style.AppendFormat(CultureInfo.InvariantCulture, " -unity-text-outline-color: rgba({0}, {1}, {2}, {3:0.###});", sr, sg, sb, strokeColor.a);
                 }
 

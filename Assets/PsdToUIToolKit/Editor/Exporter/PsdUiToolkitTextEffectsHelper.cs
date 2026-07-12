@@ -58,7 +58,7 @@ namespace PsdTools.UIToolKit
                     if (untfPos + 16 <= data.Length)
                     {
                         double sz = ReadBigEndianDouble(data, untfPos + 8);
-                        strokeSize = Mathf.Max(1f, (float)sz);
+                        strokeSize = Mathf.Max(0f, (float)sz);
                     }
                 }
             }
