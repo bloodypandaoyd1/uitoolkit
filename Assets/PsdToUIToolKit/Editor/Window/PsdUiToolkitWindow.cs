@@ -644,34 +644,6 @@ namespace PsdTools.UIToolKit
             });
             _inspectorScroll.Add(modeField);
 
-            Slider confidenceSlider = new Slider("Min confidence", 0f, 1f) { value = autoLayout.minimumConfidence };
-            confidenceSlider.showInputField = true;
-            confidenceSlider.RegisterValueChangedCallback(evt =>
-            {
-                PsdUiToolkitExportConfigData current = EnsureConfigData();
-                current.autoLayout.minimumConfidence = evt.newValue;
-                PersistConfigAndRebuildInspector();
-            });
-            _inspectorScroll.Add(confidenceSlider);
-
-            IntegerField alignmentToleranceField = new IntegerField("Alignment tolerance") { value = autoLayout.alignmentTolerance };
-            alignmentToleranceField.RegisterValueChangedCallback(evt =>
-            {
-                PsdUiToolkitExportConfigData current = EnsureConfigData();
-                current.autoLayout.alignmentTolerance = evt.newValue;
-                PersistConfigAndRebuildInspector();
-            });
-            _inspectorScroll.Add(alignmentToleranceField);
-
-            IntegerField gapToleranceField = new IntegerField("Gap tolerance") { value = autoLayout.gapTolerance };
-            gapToleranceField.RegisterValueChangedCallback(evt =>
-            {
-                PsdUiToolkitExportConfigData current = EnsureConfigData();
-                current.autoLayout.gapTolerance = evt.newValue;
-                PersistConfigAndRebuildInspector();
-            });
-            _inspectorScroll.Add(gapToleranceField);
-
             Toggle rebuildTreeToggle = new Toggle("Rebuild layout tree") { value = autoLayout.rebuildLayoutTree };
             rebuildTreeToggle.RegisterValueChangedCallback(evt =>
             {
@@ -699,20 +671,76 @@ namespace PsdTools.UIToolKit
             });
             _inspectorScroll.Add(backgroundToggle);
 
-            IntegerField nestingField = new IntegerField("Max nesting depth") { value = autoLayout.maxNestingDepth };
-            nestingField.RegisterValueChangedCallback(evt =>
+            PsdUiToolkitAutoLayoutDetectionProfile profile = PsdUiToolkitAutoLayoutDetectionProfile.Resolve(autoLayout);
+            if (autoLayout.detectionMode == PsdUiToolkitAutoLayoutMode.Custom)
             {
-                PsdUiToolkitExportConfigData current = EnsureConfigData();
-                current.autoLayout.maxNestingDepth = evt.newValue;
-                PersistConfigAndRebuildInspector();
-            });
-            _inspectorScroll.Add(nestingField);
+                AddCustomAutoLayoutFields(autoLayout, profile);
+            }
+            else
+            {
+                _inspectorScroll.Add(new HelpBox(profile.GetSummary(), HelpBoxMessageType.Info));
+            }
 
             EnumField fallbackField = new EnumField("Fallback", autoLayout.fallbackMode);
             fallbackField.SetEnabled(false);
             _inspectorScroll.Add(fallbackField);
 
             _inspectorScroll.Add(new HelpBox("Auto-layout remains opt-in and falls back to absolute positioning whenever analysis is disabled or confidence is too low. Rebuild layout tree inserts a separate layout-tree pass while leaving raster export unchanged.", HelpBoxMessageType.Info));
+        }
+
+        private void AddCustomAutoLayoutFields(PsdUiToolkitAutoLayoutGlobalConfig autoLayout, PsdUiToolkitAutoLayoutDetectionProfile profile)
+        {
+            _inspectorScroll.Add(new Label("Custom Detection") { style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 8f } });
+
+            AddAutoLayoutIntField("Alignment tolerance", autoLayout.alignmentTolerance, (data, value) => data.autoLayout.alignmentTolerance = value);
+            AddAutoLayoutIntField("Gap tolerance", autoLayout.gapTolerance, (data, value) => data.autoLayout.gapTolerance = value);
+            AddAutoLayoutIntField("Max nesting depth", autoLayout.maxNestingDepth, (data, value) => data.autoLayout.maxNestingDepth = value);
+            AddAutoLayoutFloatField("Minimum confidence", autoLayout.minimumConfidence, (data, value) => data.autoLayout.minimumConfidence = value);
+            AddAutoLayoutFloatField("Ambiguity gap", autoLayout.ambiguityGap, (data, value) => data.autoLayout.ambiguityGap = value);
+            AddAutoLayoutFloatField("Background fill threshold", autoLayout.backgroundFillThreshold, (data, value) => data.autoLayout.backgroundFillThreshold = value);
+            AddAutoLayoutIntField("Min Row/Column candidates", autoLayout.minimumFlowCandidates, (data, value) => data.autoLayout.minimumFlowCandidates = value);
+            AddAutoLayoutIntField("Min Grid candidates", autoLayout.minimumGridCandidates, (data, value) => data.autoLayout.minimumGridCandidates = value);
+            AddAutoLayoutIntField("Min virtual-container candidates", autoLayout.minimumVirtualContainerCandidates, (data, value) => data.autoLayout.minimumVirtualContainerCandidates = value);
+
+            _inspectorScroll.Add(new Label("Row / Column Weights") { style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 8f } });
+            AddAutoLayoutFloatField("Alignment weight", autoLayout.flowAlignmentWeight, (data, value) => data.autoLayout.flowAlignmentWeight = value);
+            AddAutoLayoutFloatField("Gap weight", autoLayout.flowGapWeight, (data, value) => data.autoLayout.flowGapWeight = value);
+            AddAutoLayoutFloatField("Overlap weight", autoLayout.flowOverlapWeight, (data, value) => data.autoLayout.flowOverlapWeight = value);
+            AddAutoLayoutFloatField("Span weight", autoLayout.flowSpanWeight, (data, value) => data.autoLayout.flowSpanWeight = value);
+
+            _inspectorScroll.Add(new Label("Grid Weights") { style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 8f } });
+            AddAutoLayoutFloatField("Occupancy weight", autoLayout.gridOccupancyWeight, (data, value) => data.autoLayout.gridOccupancyWeight = value);
+            AddAutoLayoutFloatField("Size consistency weight", autoLayout.gridSizeWeight, (data, value) => data.autoLayout.gridSizeWeight = value);
+            AddAutoLayoutFloatField("Grid alignment weight", autoLayout.gridAlignmentWeight, (data, value) => data.autoLayout.gridAlignmentWeight = value);
+            AddAutoLayoutFloatField("Grid gap weight", autoLayout.gridGapWeight, (data, value) => data.autoLayout.gridGapWeight = value);
+            AddAutoLayoutFloatField("Grid overlap weight", autoLayout.gridOverlapWeight, (data, value) => data.autoLayout.gridOverlapWeight = value);
+
+            if (profile.UsedFlowWeightFallback || profile.UsedGridWeightFallback)
+                _inspectorScroll.Add(new HelpBox("A weight group totals zero. Balanced weights will be used for that group until at least one weight is greater than zero.", HelpBoxMessageType.Warning));
+            else
+                _inspectorScroll.Add(new HelpBox("Weights are normalized automatically at analysis time.", HelpBoxMessageType.Info));
+        }
+
+        private void AddAutoLayoutIntField(string label, int value, Action<PsdUiToolkitExportConfigData, int> setter)
+        {
+            IntegerField field = new IntegerField(label) { value = value };
+            field.RegisterValueChangedCallback(evt =>
+            {
+                setter(EnsureConfigData(), evt.newValue);
+                PersistConfigAndRebuildInspector();
+            });
+            _inspectorScroll.Add(field);
+        }
+
+        private void AddAutoLayoutFloatField(string label, float value, Action<PsdUiToolkitExportConfigData, float> setter)
+        {
+            FloatField field = new FloatField(label) { value = value };
+            field.RegisterValueChangedCallback(evt =>
+            {
+                setter(EnsureConfigData(), evt.newValue);
+                PersistConfigAndRebuildInspector();
+            });
+            _inspectorScroll.Add(field);
         }
 
         private void AddAutoLayoutInspectorSection(PsdUiToolkitLayerConfig config)

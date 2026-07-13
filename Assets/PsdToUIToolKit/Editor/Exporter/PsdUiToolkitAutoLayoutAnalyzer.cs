@@ -67,9 +67,6 @@ namespace PsdTools.UIToolKit
 
     internal static class PsdUiToolkitAutoLayoutAnalyzer
     {
-        private const float DetectionFloor = 0.55f;
-        private const float AmbiguityGap = 0.08f;
-
         private readonly struct LayoutAnalysisResult
         {
             public LayoutAnalysisResult(PsdUiToolkitLayoutType layoutType, float confidence, string summary)
@@ -236,22 +233,24 @@ namespace PsdTools.UIToolKit
             if (renderAsLeaf)
                 return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "Leaf nodes keep absolute positioning.");
 
+            PsdUiToolkitAutoLayoutDetectionProfile profile = configMap.GetAutoLayoutProfile();
             List<PsdUiToolkitLayoutNode> flowCandidates = GetFlowCandidates(childNodes, bounds, configMap);
-            if (flowCandidates.Count < 2)
-                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "Not enough flow candidates under this container to infer layout.");
+            if (flowCandidates.Count < profile.MinimumFlowCandidates)
+                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, $"{profile.Mode}: found {flowCandidates.Count} flow candidates; requires at least {profile.MinimumFlowCandidates}.");
 
-            PsdUiToolkitAutoLayoutGlobalConfig autoLayout = configMap.GetAutoLayoutConfig();
-            LayoutScore rowScore = ScoreRow(flowCandidates, autoLayout);
-            LayoutScore columnScore = ScoreColumn(flowCandidates, autoLayout);
-            LayoutScore gridScore = ScoreGrid(flowCandidates, autoLayout);
-            LayoutAnalysisResult best = SelectBestLayout(rowScore, columnScore, gridScore);
+            LayoutScore rowScore = ScoreRow(flowCandidates, profile);
+            LayoutScore columnScore = ScoreColumn(flowCandidates, profile);
+            LayoutScore gridScore = ScoreGrid(flowCandidates, profile);
+            LayoutAnalysisResult best = SelectBestLayout(rowScore, columnScore, gridScore, profile);
             if (best.LayoutType != PsdUiToolkitLayoutType.Absolute)
                 return best;
+            if (!string.IsNullOrEmpty(best.Summary))
+                return best;
 
-            return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, "No high-confidence row, column, or grid pattern was detected; keep absolute export.");
+            return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, $"{profile.Mode}: no row, column, or grid candidate was detected; keep absolute export.");
         }
 
-        private static LayoutAnalysisResult SelectBestLayout(LayoutScore rowScore, LayoutScore columnScore, LayoutScore gridScore)
+        private static LayoutAnalysisResult SelectBestLayout(LayoutScore rowScore, LayoutScore columnScore, LayoutScore gridScore, PsdUiToolkitAutoLayoutDetectionProfile profile)
         {
             List<LayoutScore> candidates = new List<LayoutScore>(3);
             if (rowScore.IsCandidate)
@@ -267,12 +266,12 @@ namespace PsdTools.UIToolKit
             candidates.Sort((left, right) => right.Confidence.CompareTo(left.Confidence));
             LayoutScore best = candidates[0];
             float second = candidates.Count > 1 ? candidates[1].Confidence : 0f;
-            if (best.Confidence < DetectionFloor)
-                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, $"Best layout candidate was {best.LayoutType} at confidence {best.Confidence:0.##}, below the detection floor.");
-            if (second > 0f && best.Confidence - second < AmbiguityGap)
-                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, $"Layout candidates were ambiguous ({best.LayoutType} {best.Confidence:0.##} vs {candidates[1].LayoutType} {second:0.##}).");
+            if (best.Confidence < profile.MinimumConfidence)
+                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, $"{profile.Mode}: best candidate {best.LayoutType} scored {best.Confidence:0.##}, below minimum confidence {profile.MinimumConfidence:0.##}.");
+            if (second > 0f && best.Confidence - second < profile.AmbiguityGap)
+                return new LayoutAnalysisResult(PsdUiToolkitLayoutType.Absolute, 0f, $"{profile.Mode}: candidates were ambiguous ({best.LayoutType} {best.Confidence:0.##} vs {candidates[1].LayoutType} {second:0.##}; required gap {profile.AmbiguityGap:0.##}).");
 
-            return new LayoutAnalysisResult(best.LayoutType, best.Confidence, best.Summary);
+            return new LayoutAnalysisResult(best.LayoutType, best.Confidence, $"{profile.Mode}: {best.Summary}");
         }
 
         private static List<PsdUiToolkitLayoutNode> GetFlowCandidates(List<PsdUiToolkitLayoutNode> childNodes, PsdUiToolkitLayerBounds parentBounds, PsdUiToolkitLayerConfigMap configMap)
@@ -311,7 +310,8 @@ namespace PsdTools.UIToolKit
             if (childNode.SourceLayer.Kind == LayerKind.Type)
                 return false;
 
-            int tolerance = Math.Max(2, configMap.GetAutoLayoutConfig().alignmentTolerance);
+            PsdUiToolkitAutoLayoutDetectionProfile profile = configMap.GetAutoLayoutProfile();
+            int tolerance = Math.Max(2, profile.AlignmentTolerance);
             bool fillsParent = Math.Abs(childNode.Bounds.Left - parentBounds.Left) <= tolerance
                 && Math.Abs(childNode.Bounds.Top - parentBounds.Top) <= tolerance
                 && Math.Abs(GetRight(childNode.Bounds) - GetRight(parentBounds)) <= tolerance
@@ -319,18 +319,18 @@ namespace PsdTools.UIToolKit
             float parentArea = Math.Max(1f, parentBounds.Width * parentBounds.Height);
             float childArea = Math.Max(1f, childNode.Bounds.Width * childNode.Bounds.Height);
             float fillRatio = childArea / parentArea;
-            return fillsParent || fillRatio >= 0.72f;
+            return fillsParent || fillRatio >= profile.BackgroundFillThreshold;
         }
 
-        private static LayoutScore ScoreRow(List<PsdUiToolkitLayoutNode> flowCandidates, PsdUiToolkitAutoLayoutGlobalConfig autoLayout)
+        private static LayoutScore ScoreRow(List<PsdUiToolkitLayoutNode> flowCandidates, PsdUiToolkitAutoLayoutDetectionProfile profile)
         {
-            if (flowCandidates.Count < 2)
+            if (flowCandidates.Count < profile.MinimumFlowCandidates)
                 return new LayoutScore(PsdUiToolkitLayoutType.Row, 0f, string.Empty);
 
             List<PsdUiToolkitLayoutNode> sorted = new List<PsdUiToolkitLayoutNode>(flowCandidates);
             sorted.Sort(CompareByLeftThenTop);
-            float tolerance = Math.Max(1f, autoLayout.alignmentTolerance);
-            float gapTolerance = Math.Max(1f, autoLayout.gapTolerance);
+            float tolerance = Math.Max(1f, profile.AlignmentTolerance);
+            float gapTolerance = Math.Max(1f, profile.GapTolerance);
             float topDeviation;
             float centerDeviation;
             float bottomDeviation;
@@ -360,20 +360,23 @@ namespace PsdTools.UIToolKit
             float gapDeviation;
             ComputeMainAxisMetrics(sorted, true, gapTolerance, out overlapScore, out gapScore, out averageGap, out gapDeviation);
             float spanScore = ComputeSpanScore(sorted, true);
-            float confidence = 0.42f * alignmentScore + 0.25f * gapScore + 0.2f * overlapScore + 0.13f * spanScore;
+            float confidence = profile.FlowAlignmentWeight * alignmentScore
+                + profile.FlowGapWeight * gapScore
+                + profile.FlowOverlapWeight * overlapScore
+                + profile.FlowSpanWeight * spanScore;
             string summary = $"Row heuristic: {anchor} aligned (avg deviation {alignmentDeviation:0.#}), avg gap {averageGap:0.#}, gap deviation {gapDeviation:0.#}, overlap score {overlapScore:0.##}.";
             return new LayoutScore(PsdUiToolkitLayoutType.Row, confidence, summary);
         }
 
-        private static LayoutScore ScoreColumn(List<PsdUiToolkitLayoutNode> flowCandidates, PsdUiToolkitAutoLayoutGlobalConfig autoLayout)
+        private static LayoutScore ScoreColumn(List<PsdUiToolkitLayoutNode> flowCandidates, PsdUiToolkitAutoLayoutDetectionProfile profile)
         {
-            if (flowCandidates.Count < 2)
+            if (flowCandidates.Count < profile.MinimumFlowCandidates)
                 return new LayoutScore(PsdUiToolkitLayoutType.Column, 0f, string.Empty);
 
             List<PsdUiToolkitLayoutNode> sorted = new List<PsdUiToolkitLayoutNode>(flowCandidates);
             sorted.Sort(CompareByTopThenLeft);
-            float tolerance = Math.Max(1f, autoLayout.alignmentTolerance);
-            float gapTolerance = Math.Max(1f, autoLayout.gapTolerance);
+            float tolerance = Math.Max(1f, profile.AlignmentTolerance);
+            float gapTolerance = Math.Max(1f, profile.GapTolerance);
             float leftDeviation;
             float centerDeviation;
             float rightDeviation;
@@ -403,17 +406,20 @@ namespace PsdTools.UIToolKit
             float gapDeviation;
             ComputeMainAxisMetrics(sorted, false, gapTolerance, out overlapScore, out gapScore, out averageGap, out gapDeviation);
             float spanScore = ComputeSpanScore(sorted, false);
-            float confidence = 0.42f * alignmentScore + 0.25f * gapScore + 0.2f * overlapScore + 0.13f * spanScore;
+            float confidence = profile.FlowAlignmentWeight * alignmentScore
+                + profile.FlowGapWeight * gapScore
+                + profile.FlowOverlapWeight * overlapScore
+                + profile.FlowSpanWeight * spanScore;
             string summary = $"Column heuristic: {anchor} aligned (avg deviation {alignmentDeviation:0.#}), avg gap {averageGap:0.#}, gap deviation {gapDeviation:0.#}, overlap score {overlapScore:0.##}.";
             return new LayoutScore(PsdUiToolkitLayoutType.Column, confidence, summary);
         }
 
-        private static LayoutScore ScoreGrid(List<PsdUiToolkitLayoutNode> flowCandidates, PsdUiToolkitAutoLayoutGlobalConfig autoLayout)
+        private static LayoutScore ScoreGrid(List<PsdUiToolkitLayoutNode> flowCandidates, PsdUiToolkitAutoLayoutDetectionProfile profile)
         {
-            if (flowCandidates.Count < 4)
+            if (flowCandidates.Count < profile.MinimumGridCandidates)
                 return new LayoutScore(PsdUiToolkitLayoutType.Grid, 0f, string.Empty);
 
-            int clusterTolerance = Math.Max(autoLayout.alignmentTolerance, autoLayout.gapTolerance);
+            int clusterTolerance = Math.Max(profile.AlignmentTolerance, profile.GapTolerance);
             List<List<PsdUiToolkitLayoutNode>> rows = ClusterNodes(flowCandidates, true, clusterTolerance);
             List<List<PsdUiToolkitLayoutNode>> columns = ClusterNodes(flowCandidates, false, clusterTolerance);
             if (rows.Count < 2 || columns.Count < 2)
@@ -424,8 +430,12 @@ namespace PsdTools.UIToolKit
             float sizeScore = ComputeSizeConsistencyScore(flowCandidates);
             float alignmentScore = ComputeGridAlignmentScore(rows, columns, clusterTolerance);
             float gapScore = ComputeGridGapScore(rows, clusterTolerance);
-            float overlapScore = ComputePairwiseOverlapScore(flowCandidates, Math.Max(1f, autoLayout.gapTolerance));
-            float confidence = 0.28f * occupancy + 0.24f * sizeScore + 0.2f * alignmentScore + 0.16f * gapScore + 0.12f * overlapScore;
+            float overlapScore = ComputePairwiseOverlapScore(flowCandidates, Math.Max(1f, profile.GapTolerance));
+            float confidence = profile.GridOccupancyWeight * occupancy
+                + profile.GridSizeWeight * sizeScore
+                + profile.GridAlignmentWeight * alignmentScore
+                + profile.GridGapWeight * gapScore
+                + profile.GridOverlapWeight * overlapScore;
             string summary = $"Grid heuristic: {rows.Count} rows x {columns.Count} columns, occupancy {occupancy:0.##}, size score {sizeScore:0.##}, alignment score {alignmentScore:0.##}.";
             return new LayoutScore(PsdUiToolkitLayoutType.Grid, confidence, summary);
         }

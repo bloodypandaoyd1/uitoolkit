@@ -367,7 +367,8 @@ namespace PsdTools.UIToolKit
                 return FlowContainerPlan.Disabled(node.LayoutType);
 
             PsdUiToolkitAutoLayoutGlobalConfig autoLayout = configMap.GetAutoLayoutConfig();
-            if (!autoLayout.ShouldAnalyze || node.Confidence < autoLayout.minimumConfidence)
+            PsdUiToolkitAutoLayoutDetectionProfile profile = configMap.GetAutoLayoutProfile();
+            if (!autoLayout.ShouldAnalyze || node.Confidence < profile.MinimumConfidence)
                 return FlowContainerPlan.Disabled(node.LayoutType);
 
             FlowContainerPlan plan = new FlowContainerPlan
@@ -383,9 +384,9 @@ namespace PsdTools.UIToolKit
                     plan.FlowChildren.Add(child);
             }
 
-            if ((node.LayoutType == PsdUiToolkitLayoutType.Row || node.LayoutType == PsdUiToolkitLayoutType.Column) && plan.FlowChildren.Count < 2)
+            if ((node.LayoutType == PsdUiToolkitLayoutType.Row || node.LayoutType == PsdUiToolkitLayoutType.Column) && plan.FlowChildren.Count < profile.MinimumFlowCandidates)
                 return FlowContainerPlan.Disabled(node.LayoutType);
-            if (node.LayoutType == PsdUiToolkitLayoutType.Grid && plan.FlowChildren.Count < 4)
+            if (node.LayoutType == PsdUiToolkitLayoutType.Grid && plan.FlowChildren.Count < profile.MinimumGridCandidates)
                 return FlowContainerPlan.Disabled(node.LayoutType);
 
             ComputeContainerPadding(node, plan);
@@ -437,14 +438,15 @@ namespace PsdTools.UIToolKit
             if (childNode.SourceLayer.Kind == LayerKind.Type)
                 return false;
 
-            int tolerance = Math.Max(2, configMap.GetAutoLayoutConfig().alignmentTolerance);
+            PsdUiToolkitAutoLayoutDetectionProfile profile = configMap.GetAutoLayoutProfile();
+            int tolerance = Math.Max(2, profile.AlignmentTolerance);
             bool fillsParent = Math.Abs(childNode.Bounds.Left - parentBounds.Left) <= tolerance
                 && Math.Abs(childNode.Bounds.Top - parentBounds.Top) <= tolerance
                 && Math.Abs(GetRight(childNode.Bounds) - GetRight(parentBounds)) <= tolerance
                 && Math.Abs(GetBottom(childNode.Bounds) - GetBottom(parentBounds)) <= tolerance;
             float parentArea = Math.Max(1f, parentBounds.Width * parentBounds.Height);
             float childArea = Math.Max(1f, childNode.Bounds.Width * childNode.Bounds.Height);
-            return fillsParent || (childArea / parentArea) >= 0.72f;
+            return fillsParent || (childArea / parentArea) >= profile.BackgroundFillThreshold;
         }
 
         private static void ComputeContainerPadding(PsdUiToolkitLayoutNode node, FlowContainerPlan plan)
@@ -568,7 +570,8 @@ namespace PsdTools.UIToolKit
             if (flowChildren.Count == 0)
                 return rows;
 
-            int tolerance = Math.Max(4, Math.Max(configMap.GetAutoLayoutConfig().alignmentTolerance, configMap.GetAutoLayoutConfig().gapTolerance));
+            PsdUiToolkitAutoLayoutDetectionProfile profile = configMap.GetAutoLayoutProfile();
+            int tolerance = Math.Max(4, Math.Max(profile.AlignmentTolerance, profile.GapTolerance));
             List<PsdUiToolkitLayoutNode> sorted = new List<PsdUiToolkitLayoutNode>(flowChildren);
             sorted.Sort(CompareByTopThenLeft);
             List<float> anchors = new List<float>();
