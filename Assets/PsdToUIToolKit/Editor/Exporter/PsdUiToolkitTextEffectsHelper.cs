@@ -131,6 +131,9 @@ namespace PsdTools.UIToolKit
 
             float radians = angle * Mathf.Deg2Rad;
             shadowOffset = new Vector2(distance * Mathf.Cos(radians), distance * Mathf.Sin(radians));
+            float maxAbsoluteOffset = Mathf.Max(Mathf.Abs(shadowOffset.x), Mathf.Abs(shadowOffset.y));
+            if (maxAbsoluteOffset > 1f)
+                shadowOffset /= maxAbsoluteOffset;
 
             float opacity = 0.75f;
             int opctPos = FindPattern(data, "Opct", drshPos);
