@@ -649,10 +649,6 @@ namespace PsdTools.UIToolKit
                 _inspectorScroll.Add(new HelpBox(profile.GetSummary(), HelpBoxMessageType.Info));
             }
 
-            EnumField fallbackField = new EnumField("Fallback", autoLayout.fallbackMode);
-            fallbackField.SetEnabled(false);
-            _inspectorScroll.Add(fallbackField);
-
             _inspectorScroll.Add(new HelpBox("Auto-layout remains opt-in and falls back to absolute positioning whenever analysis is disabled or confidence is too low. Rebuild layout tree inserts a separate layout-tree pass while leaving raster export unchanged.", HelpBoxMessageType.Info));
         }
 
