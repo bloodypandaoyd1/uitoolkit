@@ -35,7 +35,6 @@ namespace PsdTools.UIToolKit
         public int Width;
         public int Height;
         public Vector4? SliceBorder;
-        public bool IsCustomImage;
     }
 
     internal sealed class PsdUiToolkitRasterExportResult
@@ -339,12 +338,6 @@ namespace PsdTools.UIToolKit
             if (layer.Kind == LayerKind.Type)
                 return;
 
-            if (_configMap.UseCustomImage(layer))
-            {
-                RegisterCustomImage(layer);
-                return;
-            }
-
             ExportSingleLayer(layer);
         }
 
@@ -389,14 +382,6 @@ namespace PsdTools.UIToolKit
             {
                 foreach (Layer orphan in clippedLayers)
                     ExportLayerTree(orphan);
-                return;
-            }
-
-            if (_configMap.UseCustomImage(baseLayer))
-            {
-                RegisterCustomImage(baseLayer);
-                foreach (Layer clipped in clippedLayers)
-                    SuppressLayer(clipped);
                 return;
             }
 
@@ -464,35 +449,6 @@ namespace PsdTools.UIToolKit
                 return;
 
             QueueRasterForExport(layer, texture);
-        }
-
-        private void RegisterCustomImage(Layer layer)
-        {
-            if (layer?.LayerId == null)
-                return;
-
-            string customPath = _configMap.GetCustomImagePath(layer);
-            if (string.IsNullOrEmpty(customPath))
-                return;
-
-            Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(customPath);
-            Object asset = (Object)sprite ?? AssetDatabase.LoadAssetAtPath<Texture2D>(customPath);
-            if (asset == null)
-                return;
-
-            PsdUiToolkitLayerBounds bounds = GetLayerBounds(layer);
-            _result.AssetsByLayerId[layer.LayerId.Value] = new PsdUiToolkitRasterAssetInfo
-            {
-                LayerId = layer.LayerId.Value,
-                AssetPath = customPath,
-                StyleImageUri = PsdUiToolkitAssetPathUtility.BuildProjectDatabaseUri(asset),
-                Width = sprite != null ? Mathf.RoundToInt(sprite.rect.width) : bounds.Width,
-                Height = sprite != null ? Mathf.RoundToInt(sprite.rect.height) : bounds.Height,
-                SliceBorder = sprite != null && sprite.border.sqrMagnitude > 0f
-                    ? new Vector4(sprite.border.x, sprite.border.y, sprite.border.z, sprite.border.w)
-                    : (Vector4?)null,
-                IsCustomImage = true,
-            };
         }
 
         private void QueueRasterForExport(Layer layer, Texture2D texture)
@@ -815,7 +771,7 @@ namespace PsdTools.UIToolKit
                 }
 
                 foreach (Layer layer in groupMembers)
-                    RegisterRasterAssetInfo(layer, resolvedAssetPath, sliceBorder, false);
+                    RegisterRasterAssetInfo(layer, resolvedAssetPath, sliceBorder);
             }
             finally
             {
@@ -824,7 +780,7 @@ namespace PsdTools.UIToolKit
             }
         }
 
-        private void RegisterRasterAssetInfo(Layer layer, string assetPath, Vector4? sliceBorder, bool isCustomImage)
+        private void RegisterRasterAssetInfo(Layer layer, string assetPath, Vector4? sliceBorder)
         {
             if (layer?.LayerId == null || string.IsNullOrEmpty(assetPath))
                 return;
@@ -837,7 +793,6 @@ namespace PsdTools.UIToolKit
                 Width = bounds.Width,
                 Height = bounds.Height,
                 SliceBorder = sliceBorder,
-                IsCustomImage = isCustomImage,
             };
         }
 
@@ -1313,7 +1268,7 @@ namespace PsdTools.UIToolKit
             Dictionary<string, Vector4?> spriteBordersByPath = new Dictionary<string, Vector4?>(StringComparer.OrdinalIgnoreCase);
             foreach (PsdUiToolkitRasterAssetInfo info in _result.AssetsByLayerId.Values)
             {
-                if (info.IsCustomImage || string.IsNullOrEmpty(info.AssetPath))
+                if (string.IsNullOrEmpty(info.AssetPath))
                     continue;
 
                 if (!spriteBordersByPath.TryGetValue(info.AssetPath, out Vector4? existingBorder) || (!existingBorder.HasValue && info.SliceBorder.HasValue))

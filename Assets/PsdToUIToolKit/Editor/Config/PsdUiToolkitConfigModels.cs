@@ -318,8 +318,6 @@ namespace PsdTools.UIToolKit
         public int nineSliceMinCenterCols = 10;
         public int nineSliceMinCenterRows = 10;
         public int nineSliceMinSameZone = 15;
-        public bool useCustomImage;
-        public string customImagePath = "";
         public bool participateInAutoLayout = true;
 
         public static PsdUiToolkitLayerConfig CreateDefault(Layer layer)
@@ -341,8 +339,6 @@ namespace PsdTools.UIToolKit
                 nineSliceMinCenterCols = defaults.minCenterCols,
                 nineSliceMinCenterRows = defaults.minCenterRows,
                 nineSliceMinSameZone = defaults.minSameZone,
-                useCustomImage = false,
-                customImagePath = string.Empty,
                 participateInAutoLayout = true,
             };
         }
@@ -362,7 +358,6 @@ namespace PsdTools.UIToolKit
         public void Sanitize()
         {
             name ??= string.Empty;
-            customImagePath ??= string.Empty;
         }
     }
 
@@ -465,17 +460,6 @@ namespace PsdTools.UIToolKit
                 return config.GetNineSliceParams();
 
             return defaults;
-        }
-
-        public bool UseCustomImage(Layer layer)
-        {
-            PsdUiToolkitLayerConfig config = Get(layer);
-            return config.useCustomImage && !string.IsNullOrEmpty(config.customImagePath);
-        }
-
-        public string GetCustomImagePath(Layer layer)
-        {
-            return Get(layer).customImagePath ?? string.Empty;
         }
 
         public bool ParticipateInAutoLayout(Layer layer)

@@ -464,115 +464,83 @@ namespace PsdTools.UIToolKit
 
             if (_selectedLayer.Kind != LayerKind.Type)
             {
-                Toggle customImageToggle = new Toggle("Use custom image") { value = config.useCustomImage };
-                customImageToggle.RegisterValueChangedCallback(evt =>
+                Toggle sliceToggle = new Toggle("Slice / nine-slice") { value = config.sliceImage };
+                sliceToggle.RegisterValueChangedCallback(evt =>
                 {
-                    config.useCustomImage = evt.newValue;
-                    if (!evt.newValue)
-                        config.customImagePath = string.Empty;
+                    config.sliceImage = evt.newValue;
                     PersistConfig();
                     RebuildInspector();
                 });
-                _inspectorScroll.Add(customImageToggle);
+                _inspectorScroll.Add(sliceToggle);
 
-                if (config.useCustomImage)
+                Toggle localDedupToggle = new Toggle("Participate local dedup") { value = config.participateLocalDedup };
+                localDedupToggle.RegisterValueChangedCallback(evt =>
                 {
-                    Sprite currentSprite = string.IsNullOrEmpty(config.customImagePath)
-                        ? null
-                        : AssetDatabase.LoadAssetAtPath<Sprite>(config.customImagePath);
-                    ObjectField spriteField = new ObjectField("Custom Sprite")
-                    {
-                        objectType = typeof(Sprite),
-                        allowSceneObjects = false,
-                        value = currentSprite,
-                    };
-                    spriteField.RegisterValueChangedCallback(evt =>
-                    {
-                        config.customImagePath = evt.newValue != null ? AssetDatabase.GetAssetPath(evt.newValue) : string.Empty;
-                        PersistConfig();
-                    });
-                    _inspectorScroll.Add(spriteField);
-                }
-                else
+                    config.participateLocalDedup = evt.newValue;
+                    PersistConfig();
+                });
+                _inspectorScroll.Add(localDedupToggle);
+
+                Toggle commonDedupToggle = new Toggle("Participate common dedup") { value = config.participateCommonDedup };
+                commonDedupToggle.RegisterValueChangedCallback(evt =>
                 {
-                    Toggle sliceToggle = new Toggle("Slice / nine-slice") { value = config.sliceImage };
-                    sliceToggle.RegisterValueChangedCallback(evt =>
+                    config.participateCommonDedup = evt.newValue;
+                    PersistConfig();
+                });
+                _inspectorScroll.Add(commonDedupToggle);
+
+                if (config.sliceImage)
+                {
+                    Toggle customNineSliceToggle = new Toggle("Override nine-slice params") { value = config.useCustomNineSliceParams };
+                    customNineSliceToggle.RegisterValueChangedCallback(evt =>
                     {
-                        config.sliceImage = evt.newValue;
+                        config.useCustomNineSliceParams = evt.newValue;
                         PersistConfig();
                         RebuildInspector();
                     });
-                    _inspectorScroll.Add(sliceToggle);
+                    _inspectorScroll.Add(customNineSliceToggle);
 
-                    Toggle localDedupToggle = new Toggle("Participate local dedup") { value = config.participateLocalDedup };
-                    localDedupToggle.RegisterValueChangedCallback(evt =>
+                    if (config.useCustomNineSliceParams)
                     {
-                        config.participateLocalDedup = evt.newValue;
-                        PersistConfig();
-                    });
-                    _inspectorScroll.Add(localDedupToggle);
-
-                    Toggle commonDedupToggle = new Toggle("Participate common dedup") { value = config.participateCommonDedup };
-                    commonDedupToggle.RegisterValueChangedCallback(evt =>
-                    {
-                        config.participateCommonDedup = evt.newValue;
-                        PersistConfig();
-                    });
-                    _inspectorScroll.Add(commonDedupToggle);
-
-                    if (config.sliceImage)
-                    {
-                        Toggle customNineSliceToggle = new Toggle("Override nine-slice params") { value = config.useCustomNineSliceParams };
-                        customNineSliceToggle.RegisterValueChangedCallback(evt =>
+                        IntegerField borderInsetField = new IntegerField("Border inset") { value = config.nineSliceBorderInset };
+                        borderInsetField.RegisterValueChangedCallback(evt =>
                         {
-                            config.useCustomNineSliceParams = evt.newValue;
+                            config.nineSliceBorderInset = evt.newValue;
                             PersistConfig();
-                            RebuildInspector();
                         });
-                        _inspectorScroll.Add(customNineSliceToggle);
+                        _inspectorScroll.Add(borderInsetField);
 
-                        if (config.useCustomNineSliceParams)
+                        IntegerField pixelThresholdField = new IntegerField("Pixel threshold") { value = config.nineSlicePixelThreshold };
+                        pixelThresholdField.RegisterValueChangedCallback(evt =>
                         {
-                            IntegerField borderInsetField = new IntegerField("Border inset") { value = config.nineSliceBorderInset };
-                            borderInsetField.RegisterValueChangedCallback(evt =>
-                            {
-                                config.nineSliceBorderInset = evt.newValue;
-                                PersistConfig();
-                            });
-                            _inspectorScroll.Add(borderInsetField);
+                            config.nineSlicePixelThreshold = evt.newValue;
+                            PersistConfig();
+                        });
+                        _inspectorScroll.Add(pixelThresholdField);
 
-                            IntegerField pixelThresholdField = new IntegerField("Pixel threshold") { value = config.nineSlicePixelThreshold };
-                            pixelThresholdField.RegisterValueChangedCallback(evt =>
-                            {
-                                config.nineSlicePixelThreshold = evt.newValue;
-                                PersistConfig();
-                            });
-                            _inspectorScroll.Add(pixelThresholdField);
+                        IntegerField minCenterColsField = new IntegerField("Min center cols") { value = config.nineSliceMinCenterCols };
+                        minCenterColsField.RegisterValueChangedCallback(evt =>
+                        {
+                            config.nineSliceMinCenterCols = evt.newValue;
+                            PersistConfig();
+                        });
+                        _inspectorScroll.Add(minCenterColsField);
 
-                            IntegerField minCenterColsField = new IntegerField("Min center cols") { value = config.nineSliceMinCenterCols };
-                            minCenterColsField.RegisterValueChangedCallback(evt =>
-                            {
-                                config.nineSliceMinCenterCols = evt.newValue;
-                                PersistConfig();
-                            });
-                            _inspectorScroll.Add(minCenterColsField);
+                        IntegerField minCenterRowsField = new IntegerField("Min center rows") { value = config.nineSliceMinCenterRows };
+                        minCenterRowsField.RegisterValueChangedCallback(evt =>
+                        {
+                            config.nineSliceMinCenterRows = evt.newValue;
+                            PersistConfig();
+                        });
+                        _inspectorScroll.Add(minCenterRowsField);
 
-                            IntegerField minCenterRowsField = new IntegerField("Min center rows") { value = config.nineSliceMinCenterRows };
-                            minCenterRowsField.RegisterValueChangedCallback(evt =>
-                            {
-                                config.nineSliceMinCenterRows = evt.newValue;
-                                PersistConfig();
-                            });
-                            _inspectorScroll.Add(minCenterRowsField);
-
-                            IntegerField minSameZoneField = new IntegerField("Min same-zone") { value = config.nineSliceMinSameZone };
-                            minSameZoneField.RegisterValueChangedCallback(evt =>
-                            {
-                                config.nineSliceMinSameZone = evt.newValue;
-                                PersistConfig();
-                            });
-                            _inspectorScroll.Add(minSameZoneField);
-                        }
+                        IntegerField minSameZoneField = new IntegerField("Min same-zone") { value = config.nineSliceMinSameZone };
+                        minSameZoneField.RegisterValueChangedCallback(evt =>
+                        {
+                            config.nineSliceMinSameZone = evt.newValue;
+                            PersistConfig();
+                        });
+                        _inspectorScroll.Add(minSameZoneField);
                     }
                 }
             }

@@ -158,7 +158,7 @@ namespace PsdTools.UIToolKit
                     || rasterResult.CompositeLeafLayerIds.Contains(layerId);
             }
 
-            return configMap.IsMergeExport(layer) || configMap.UseCustomImage(layer);
+            return configMap.IsMergeExport(layer);
         }
 
         private static List<RebuildNodeState> RebuildContainedSiblings(List<RebuildNodeState> siblings, PsdUiToolkitLayerBounds rootBounds, PsdUiToolkitLayerConfigMap configMap)
