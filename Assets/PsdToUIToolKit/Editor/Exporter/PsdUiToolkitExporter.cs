@@ -47,7 +47,14 @@ namespace PsdTools.UIToolKit
     public sealed class PsdUiToolkitExportArtifacts
     {
         public string ImageFolderAssetPath { get; internal set; }
-        public string UxmlAssetPath { get; internal set; }
+        public string GeneratedUxmlAssetPath { get; internal set; }
+        public string EditableUxmlAssetPath { get; internal set; }
+
+        public string UxmlAssetPath
+        {
+            get => GeneratedUxmlAssetPath;
+            internal set => GeneratedUxmlAssetPath = value;
+        }
     }
 
     internal static class PsdUiToolkitAssetPathUtility
@@ -1484,11 +1491,12 @@ namespace PsdTools.UIToolKit
             string imageRoot = PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(imageExportRoot);
             string uxmlRoot = PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(uxmlExportRoot);
             string imageFolderAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(imageRoot, psdName);
-            string uxmlAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, psdName + ".uxml");
+            string generatedUxmlAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, psdName + ".generated.uxml");
+            string editableUxmlAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, psdName + ".uxml");
 
             PsdUiToolkitAssetPathUtility.EnsureAssetDirectoryExists(imageRoot);
             PsdUiToolkitAssetPathUtility.EnsureAssetDirectoryExists(imageFolderAssetPath);
-            PsdUiToolkitAssetPathUtility.EnsureParentDirectoryForFile(uxmlAssetPath);
+            PsdUiToolkitAssetPathUtility.EnsureParentDirectoryForFile(generatedUxmlAssetPath);
 
             PsdImage psd = null;
             try
@@ -1501,23 +1509,51 @@ namespace PsdTools.UIToolKit
                 PsdUiToolkitFontMappingLookup fontMapping = PsdUiToolkitFontMappingConfig.PrepareForExport(psd);
                 PsdUiToolkitRasterExporter rasterExporter = new PsdUiToolkitRasterExporter(psd, configMap, imageFolderAssetPath, autoImageNaming);
                 PsdUiToolkitRasterExportResult rasterResult = rasterExporter.ExportAll();
-                PsdUiToolkitLayoutTree layoutTree = configMap.GetAutoLayoutConfig().rebuildLayoutTree
-                    ? PsdUiToolkitLayoutTreeRebuilder.Build(psd, configMap, rasterResult, psdName)
-                    : PsdUiToolkitAutoLayoutAnalyzer.Analyze(psd, configMap, rasterResult, psdName);
-                PsdUiToolkitUxmlWriter.Write(layoutTree, configMap, rasterResult, fontMapping, uxmlAssetPath);
+                PsdUiToolkitLayoutTree layoutTree = PsdUiToolkitManualLayoutBuilder.Build(psd, configMap, rasterResult, psdName);
+                PsdUiToolkitUxmlWriter.Write(layoutTree, configMap, rasterResult, fontMapping, generatedUxmlAssetPath);
+                for (int i = 0; i < layoutTree.Warnings.Count; i++)
+                    Debug.LogWarning($"[PsdUiToolkit] {layoutTree.Warnings[i]}");
                 DeleteStaleGeneratedImages(imageFolderAssetPath, rasterResult);
                 AssetDatabase.Refresh();
 
                 return new PsdUiToolkitExportArtifacts
                 {
                     ImageFolderAssetPath = imageFolderAssetPath,
-                    UxmlAssetPath = uxmlAssetPath,
+                    GeneratedUxmlAssetPath = generatedUxmlAssetPath,
+                    EditableUxmlAssetPath = editableUxmlAssetPath,
                 };
             }
             finally
             {
                 psd?.ReleaseAllData();
             }
+        }
+
+        public static string CreateEditableCopy(
+            string generatedUxmlAssetPath,
+            string editableUxmlAssetPath,
+            bool overwrite = false)
+        {
+            string generatedPath = PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(generatedUxmlAssetPath);
+            string editablePath = PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(editableUxmlAssetPath);
+            if (AssetDatabase.LoadAssetAtPath<Object>(generatedPath) == null)
+                throw new FileNotFoundException("Generate the UXML draft before creating an editable copy.", generatedPath);
+
+            Object existingEditable = AssetDatabase.LoadAssetAtPath<Object>(editablePath);
+            if (existingEditable != null)
+            {
+                if (!overwrite)
+                    return editablePath;
+                if (!AssetDatabase.DeleteAsset(editablePath))
+                    throw new IOException($"Could not replace editable UXML at {editablePath}.");
+            }
+
+            PsdUiToolkitAssetPathUtility.EnsureParentDirectoryForFile(editablePath);
+            if (!AssetDatabase.CopyAsset(generatedPath, editablePath))
+                throw new IOException($"Could not create editable UXML at {editablePath}.");
+
+            AssetDatabase.ImportAsset(editablePath, ImportAssetOptions.ForceUpdate);
+            return editablePath;
         }
     }
 }

@@ -17,7 +17,9 @@ namespace PsdTools.UIToolKit
             List<PsdUiToolkitLayoutNode> children,
             string displayName = null,
             bool isSynthetic = false,
-            string rebuildReason = null)
+            string rebuildReason = null,
+            PsdUiToolkitItemRole itemRole = PsdUiToolkitItemRole.FollowParent,
+            string virtualGroupId = null)
         {
             SourceLayer = sourceLayer;
             Bounds = bounds;
@@ -32,6 +34,8 @@ namespace PsdTools.UIToolKit
                 : displayName;
             IsSynthetic = isSynthetic;
             RebuildReason = rebuildReason ?? string.Empty;
+            ItemRole = itemRole;
+            VirtualGroupId = virtualGroupId ?? string.Empty;
         }
 
         public Layer SourceLayer { get; }
@@ -45,17 +49,26 @@ namespace PsdTools.UIToolKit
         public string DisplayName { get; }
         public bool IsSynthetic { get; }
         public string RebuildReason { get; }
+        public PsdUiToolkitItemRole ItemRole { get; }
+        public string VirtualGroupId { get; }
     }
 
     internal sealed class PsdUiToolkitLayoutTree
     {
-        public PsdUiToolkitLayoutTree(string rootName, int width, int height, bool autoLayoutEnabled, List<PsdUiToolkitLayoutNode> children)
+        public PsdUiToolkitLayoutTree(
+            string rootName,
+            int width,
+            int height,
+            bool autoLayoutEnabled,
+            List<PsdUiToolkitLayoutNode> children,
+            List<string> warnings = null)
         {
             RootName = rootName ?? string.Empty;
             Width = width;
             Height = height;
             AutoLayoutEnabled = autoLayoutEnabled;
             Children = children ?? new List<PsdUiToolkitLayoutNode>();
+            Warnings = warnings ?? new List<string>();
         }
 
         public string RootName { get; }
@@ -63,6 +76,7 @@ namespace PsdTools.UIToolKit
         public int Height { get; }
         public bool AutoLayoutEnabled { get; }
         public List<PsdUiToolkitLayoutNode> Children { get; }
+        public List<string> Warnings { get; }
     }
 
     internal static class PsdUiToolkitAutoLayoutAnalyzer

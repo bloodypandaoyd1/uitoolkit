@@ -21,18 +21,18 @@ namespace PsdTools.UIToolKit
         {
             string path = GetExportConfigPath(psdPath);
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
-                return new PsdUiToolkitExportConfigData();
+                return MigrateToCurrentVersion(new PsdUiToolkitExportConfigData());
 
             try
             {
                 string json = File.ReadAllText(path);
                 PsdUiToolkitExportConfigData data = JsonUtility.FromJson<PsdUiToolkitExportConfigData>(json);
-                return data ?? new PsdUiToolkitExportConfigData();
+                return MigrateToCurrentVersion(data ?? new PsdUiToolkitExportConfigData());
             }
             catch (Exception ex)
             {
                 Debug.LogWarning($"[PsdUiToolkit] Failed to load export config: {ex.Message}");
-                return new PsdUiToolkitExportConfigData();
+                return MigrateToCurrentVersion(new PsdUiToolkitExportConfigData());
             }
         }
 
@@ -50,13 +50,20 @@ namespace PsdTools.UIToolKit
 
                 if (data == null)
                     data = new PsdUiToolkitExportConfigData();
+                data = MigrateToCurrentVersion(data);
                 data.autoLayout = data.autoLayout.GetValidated();
                 if (data.layers == null)
                     data.layers = Array.Empty<PsdUiToolkitLayerConfig>();
+                if (data.virtualGroups == null)
+                    data.virtualGroups = Array.Empty<PsdUiToolkitVirtualGroupConfig>();
 
                 foreach (PsdUiToolkitLayerConfig entry in data.layers)
                 {
                     entry?.Sanitize();
+                }
+                foreach (PsdUiToolkitVirtualGroupConfig group in data.virtualGroups)
+                {
+                    group?.Sanitize();
                 }
 
                 string json = JsonUtility.ToJson(data, true);
@@ -81,12 +88,12 @@ namespace PsdTools.UIToolKit
         {
             if (psd == null)
             {
-                PsdUiToolkitExportConfigData fallback = data ?? new PsdUiToolkitExportConfigData();
+                PsdUiToolkitExportConfigData fallback = MigrateToCurrentVersion(data ?? new PsdUiToolkitExportConfigData());
                 fallback.autoLayout = fallback.autoLayout.GetValidated();
                 return fallback;
             }
 
-            data ??= new PsdUiToolkitExportConfigData();
+            data = MigrateToCurrentVersion(data ?? new PsdUiToolkitExportConfigData());
             data.autoLayout = data.autoLayout.GetValidated();
             Dictionary<int, PsdUiToolkitLayerConfig> existing = BuildLookup(data);
             List<PsdUiToolkitLayerConfig> ordered = new List<PsdUiToolkitLayerConfig>();
@@ -110,6 +117,37 @@ namespace PsdTools.UIToolKit
             }
 
             data.layers = ordered.ToArray();
+            return data;
+        }
+
+        public static PsdUiToolkitExportConfigData MigrateToCurrentVersion(PsdUiToolkitExportConfigData data)
+        {
+            data ??= new PsdUiToolkitExportConfigData();
+            data.layers ??= Array.Empty<PsdUiToolkitLayerConfig>();
+            data.virtualGroups ??= Array.Empty<PsdUiToolkitVirtualGroupConfig>();
+
+            if (data.configVersion < 2)
+            {
+                foreach (PsdUiToolkitLayerConfig entry in data.layers)
+                {
+                    if (entry == null)
+                        continue;
+
+                    entry.childrenLayout = PsdUiToolkitContainerLayout.Unspecified;
+                    entry.itemRole = entry.participateInAutoLayout
+                        ? PsdUiToolkitItemRole.FollowParent
+                        : PsdUiToolkitItemRole.KeepAbsolute;
+                }
+
+                data.virtualGroups = Array.Empty<PsdUiToolkitVirtualGroupConfig>();
+                data.configVersion = 2;
+            }
+
+            data.configVersion = PsdUiToolkitExportConfigData.CurrentConfigVersion;
+            foreach (PsdUiToolkitLayerConfig entry in data.layers)
+                entry?.Sanitize();
+            foreach (PsdUiToolkitVirtualGroupConfig group in data.virtualGroups)
+                group?.Sanitize();
             return data;
         }
 

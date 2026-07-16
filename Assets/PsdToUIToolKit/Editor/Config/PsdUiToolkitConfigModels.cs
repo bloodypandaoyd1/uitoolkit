@@ -27,6 +27,21 @@ namespace PsdTools.UIToolKit
         Overlay = 5,
     }
 
+    public enum PsdUiToolkitContainerLayout
+    {
+        Unspecified = 0,
+        Absolute = 1,
+        Row = 2,
+        Column = 3,
+    }
+
+    public enum PsdUiToolkitItemRole
+    {
+        FollowParent = 0,
+        KeepAbsolute = 1,
+        Background = 2,
+    }
+
     [Serializable]
     public struct PsdUiToolkitNineSliceParams
     {
@@ -319,6 +334,8 @@ namespace PsdTools.UIToolKit
         public int nineSliceMinCenterRows = 10;
         public int nineSliceMinSameZone = 15;
         public bool participateInAutoLayout = true;
+        public PsdUiToolkitContainerLayout childrenLayout = PsdUiToolkitContainerLayout.Unspecified;
+        public PsdUiToolkitItemRole itemRole = PsdUiToolkitItemRole.FollowParent;
 
         public static PsdUiToolkitLayerConfig CreateDefault(Layer layer)
         {
@@ -340,6 +357,8 @@ namespace PsdTools.UIToolKit
                 nineSliceMinCenterRows = defaults.minCenterRows,
                 nineSliceMinSameZone = defaults.minSameZone,
                 participateInAutoLayout = true,
+                childrenLayout = PsdUiToolkitContainerLayout.Unspecified,
+                itemRole = PsdUiToolkitItemRole.FollowParent,
             };
         }
 
@@ -358,25 +377,64 @@ namespace PsdTools.UIToolKit
         public void Sanitize()
         {
             name ??= string.Empty;
+            if (!Enum.IsDefined(typeof(PsdUiToolkitContainerLayout), childrenLayout))
+                childrenLayout = PsdUiToolkitContainerLayout.Unspecified;
+            if (!Enum.IsDefined(typeof(PsdUiToolkitItemRole), itemRole))
+                itemRole = PsdUiToolkitItemRole.FollowParent;
+        }
+    }
+
+    [Serializable]
+    public sealed class PsdUiToolkitVirtualGroupConfig
+    {
+        public string id = "";
+        public string name = "";
+        public int parentLayerId = -1;
+        public int[] memberLayerIds = Array.Empty<int>();
+        public PsdUiToolkitContainerLayout layout = PsdUiToolkitContainerLayout.Row;
+
+        public void Sanitize()
+        {
+            id ??= string.Empty;
+            name ??= string.Empty;
+            memberLayerIds ??= Array.Empty<int>();
+            if (layout != PsdUiToolkitContainerLayout.Row && layout != PsdUiToolkitContainerLayout.Column)
+                layout = PsdUiToolkitContainerLayout.Row;
+
+            HashSet<int> seen = new HashSet<int>();
+            List<int> uniqueIds = new List<int>(memberLayerIds.Length);
+            for (int i = 0; i < memberLayerIds.Length; i++)
+            {
+                if (seen.Add(memberLayerIds[i]))
+                    uniqueIds.Add(memberLayerIds[i]);
+            }
+
+            memberLayerIds = uniqueIds.ToArray();
         }
     }
 
     [Serializable]
     public sealed class PsdUiToolkitExportConfigData
     {
+        public const int CurrentConfigVersion = 2;
+
+        public int configVersion;
         public PsdUiToolkitAutoLayoutGlobalConfig autoLayout = PsdUiToolkitAutoLayoutGlobalConfig.Default;
         public PsdUiToolkitLayerConfig[] layers = Array.Empty<PsdUiToolkitLayerConfig>();
+        public PsdUiToolkitVirtualGroupConfig[] virtualGroups = Array.Empty<PsdUiToolkitVirtualGroupConfig>();
     }
 
     internal sealed class PsdUiToolkitLayerConfigMap
     {
         private readonly Dictionary<int, PsdUiToolkitLayerConfig> _lookup;
+        private readonly PsdUiToolkitVirtualGroupConfig[] _virtualGroups;
         private readonly PsdUiToolkitAutoLayoutGlobalConfig _autoLayout;
         private readonly PsdUiToolkitAutoLayoutDetectionProfile _autoLayoutProfile;
 
         public PsdUiToolkitLayerConfigMap(PsdUiToolkitExportConfigData data)
         {
             _lookup = PsdUiToolkitConfigStore.BuildLookup(data);
+            _virtualGroups = data?.virtualGroups ?? Array.Empty<PsdUiToolkitVirtualGroupConfig>();
             _autoLayout = data == null
                 ? PsdUiToolkitAutoLayoutGlobalConfig.Default
                 : data.autoLayout.GetValidated();
@@ -468,6 +526,21 @@ namespace PsdTools.UIToolKit
             return config.exported
                 && config.visible
                 && config.participateInAutoLayout;
+        }
+
+        public PsdUiToolkitContainerLayout GetChildrenLayout(Layer layer)
+        {
+            return Get(layer).childrenLayout;
+        }
+
+        public PsdUiToolkitItemRole GetItemRole(Layer layer)
+        {
+            return Get(layer).itemRole;
+        }
+
+        public PsdUiToolkitVirtualGroupConfig[] GetVirtualGroups()
+        {
+            return _virtualGroups;
         }
     }
 
