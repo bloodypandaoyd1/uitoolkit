@@ -12,6 +12,13 @@ namespace PsdTools.UIToolKit
 {
     public sealed class PsdUiToolkitWindow : EditorWindow
     {
+        private enum CanvasPreviewMode
+        {
+            Psd,
+            Layout,
+            Split,
+        }
+
         private PsdImage _psd;
         private string _psdPath;
         private PsdUiToolkitExportConfigData _configData;
@@ -21,6 +28,8 @@ namespace PsdTools.UIToolKit
         private readonly HashSet<Layer> _selectedLayers = new HashSet<Layer>();
         private List<PsdUiToolkitLayoutSuggestion> _layoutSuggestions = new List<PsdUiToolkitLayoutSuggestion>();
         private PsdUiToolkitLayoutTree _currentLayoutTree;
+        private readonly PsdUiToolkitLayoutEditHistory _layoutHistory =
+            new PsdUiToolkitLayoutEditHistory();
         private Texture2D _selectedLayerPreview;
         private Texture2D _psdCompositePreview;
 
@@ -33,12 +42,24 @@ namespace PsdTools.UIToolKit
         private Label _canvasTitleLabel;
         private Label _canvasEmptyLabel;
         private VisualElement _canvasViewport;
+        private VisualElement _psdCanvasViewport;
+        private VisualElement _layoutCanvasViewport;
         private VisualElement _canvasSurface;
         private VisualElement _canvasOverlay;
         private Image _canvasImage;
+        private VisualElement _layoutCanvasSurface;
+        private VisualElement _layoutCanvasRoot;
+        private readonly Dictionary<int, Texture2D> _layoutPreviewTextures =
+            new Dictionary<int, Texture2D>();
+        private CanvasPreviewMode _canvasPreviewMode = CanvasPreviewMode.Psd;
+        private ToolbarButton _psdPreviewButton;
+        private ToolbarButton _layoutPreviewButton;
+        private ToolbarButton _splitPreviewButton;
         private TextField _imageExportRootField;
         private TextField _uxmlExportRootField;
         private Toggle _autoImageNamingToggle;
+        private ToolbarButton _undoButton;
+        private ToolbarButton _redoButton;
 
         private Vector2 _lastCanvasClickPsdPosition = new Vector2(-99999f, -99999f);
         private readonly List<Layer> _canvasClickCandidates = new List<Layer>();
@@ -46,8 +67,39 @@ namespace PsdTools.UIToolKit
         private bool _canvasShowSelection = true;
         private float _canvasDrawWidth;
         private float _canvasDrawHeight;
+        private float _layoutCanvasDrawWidth;
+        private float _layoutCanvasDrawHeight;
 
         private const float CanvasSameClickThreshold = 5f;
+        private static readonly string[] ItemRoleChoices =
+        {
+            "Follow parent layout",
+            "Keep original position",
+            "Use as background",
+        };
+        private static readonly string[] ContainerLayoutChoices =
+        {
+            "Not set",
+            "Keep absolute",
+            "Row",
+            "Column",
+        };
+        private static readonly string[] MainAxisChoices =
+        {
+            "Preserve PSD spacing",
+            "Start",
+            "Center",
+            "End",
+            "Space between",
+            "Space around",
+        };
+        private static readonly string[] CrossAxisChoices =
+        {
+            "Preserve PSD offset",
+            "Start",
+            "Center",
+            "End",
+        };
 
         [MenuItem("Tools/PSD/UI Toolkit Editor")]
         public static void ShowWindow()
@@ -60,6 +112,7 @@ namespace PsdTools.UIToolKit
         {
             rootVisualElement.Clear();
             rootVisualElement.style.flexDirection = FlexDirection.Column;
+            rootVisualElement.RegisterCallback<KeyDownEvent>(OnRootKeyDown);
 
             rootVisualElement.Add(BuildToolbar());
             rootVisualElement.Add(BuildBody());
@@ -74,6 +127,8 @@ namespace PsdTools.UIToolKit
 
             ToolbarButton openButton = new ToolbarButton(OpenPsd) { text = "Open PSD" };
             ToolbarButton reloadButton = new ToolbarButton(ReloadPsd) { text = "Reload" };
+            _undoButton = new ToolbarButton(UndoLayoutEdit) { text = "Undo" };
+            _redoButton = new ToolbarButton(RedoLayoutEdit) { text = "Redo" };
             ToolbarButton exportButton = new ToolbarButton(ExportCurrentPsd) { text = "Update Generated Draft" };
             ToolbarButton editableButton = new ToolbarButton(() => CreateOrOpenEditable(false)) { text = "Create / Open Editable" };
             ToolbarButton recreateButton = new ToolbarButton(() => CreateOrOpenEditable(true)) { text = "Recreate Editable" };
@@ -81,9 +136,13 @@ namespace PsdTools.UIToolKit
             toolbar.Add(openButton);
             toolbar.Add(reloadButton);
             toolbar.Add(new ToolbarSpacer());
+            toolbar.Add(_undoButton);
+            toolbar.Add(_redoButton);
+            toolbar.Add(new ToolbarSpacer());
             toolbar.Add(exportButton);
             toolbar.Add(editableButton);
             toolbar.Add(recreateButton);
+            UpdateHistoryButtons();
 
             return toolbar;
         }
@@ -120,20 +179,44 @@ namespace PsdTools.UIToolKit
             _canvasTitleLabel = new Label("Canvas Preview") { style = { unityFontStyleAndWeight = FontStyle.Bold } };
             centerPanel.Add(_canvasTitleLabel);
 
+            Toolbar previewToolbar = new Toolbar();
+            _psdPreviewButton = new ToolbarButton(() => SetCanvasPreviewMode(CanvasPreviewMode.Psd))
+            {
+                text = "PSD",
+            };
+            _layoutPreviewButton = new ToolbarButton(() => SetCanvasPreviewMode(CanvasPreviewMode.Layout))
+            {
+                text = "Layout",
+            };
+            _splitPreviewButton = new ToolbarButton(() => SetCanvasPreviewMode(CanvasPreviewMode.Split))
+            {
+                text = "Split",
+            };
+            previewToolbar.Add(_psdPreviewButton);
+            previewToolbar.Add(_layoutPreviewButton);
+            previewToolbar.Add(_splitPreviewButton);
+            previewToolbar.style.marginTop = 4f;
+            centerPanel.Add(previewToolbar);
+
             _canvasViewport = new VisualElement();
             _canvasViewport.style.flexGrow = 1f;
             _canvasViewport.style.marginTop = 6f;
             _canvasViewport.style.backgroundColor = new Color(0.08f, 0.08f, 0.08f, 1f);
             _canvasViewport.style.overflow = Overflow.Hidden;
+            _canvasViewport.style.flexDirection = FlexDirection.Row;
             _canvasViewport.RegisterCallback<GeometryChangedEvent>(_ => UpdateCanvasGeometry());
             centerPanel.Add(_canvasViewport);
+
+            _psdCanvasViewport = CreatePreviewViewport();
+            _psdCanvasViewport.RegisterCallback<GeometryChangedEvent>(_ => UpdateCanvasGeometry());
+            _canvasViewport.Add(_psdCanvasViewport);
 
             _canvasSurface = new VisualElement();
             _canvasSurface.style.position = Position.Absolute;
             _canvasSurface.style.backgroundColor = new Color(0.72f, 0.72f, 0.72f, 1f);
             _canvasSurface.style.overflow = Overflow.Hidden;
             _canvasSurface.RegisterCallback<PointerDownEvent>(OnCanvasPointerDown);
-            _canvasViewport.Add(_canvasSurface);
+            _psdCanvasViewport.Add(_canvasSurface);
 
             _canvasImage = new Image { scaleMode = ScaleMode.StretchToFill, pickingMode = PickingMode.Ignore };
             _canvasImage.style.position = Position.Absolute;
@@ -150,6 +233,16 @@ namespace PsdTools.UIToolKit
             _canvasOverlay.style.right = 0f;
             _canvasOverlay.style.bottom = 0f;
             _canvasSurface.Add(_canvasOverlay);
+
+            _layoutCanvasViewport = CreatePreviewViewport();
+            _layoutCanvasViewport.RegisterCallback<GeometryChangedEvent>(_ => UpdateCanvasGeometry());
+            _canvasViewport.Add(_layoutCanvasViewport);
+
+            _layoutCanvasSurface = new VisualElement();
+            _layoutCanvasSurface.style.position = Position.Absolute;
+            _layoutCanvasSurface.style.backgroundColor = new Color(0.72f, 0.72f, 0.72f, 1f);
+            _layoutCanvasSurface.style.overflow = Overflow.Hidden;
+            _layoutCanvasViewport.Add(_layoutCanvasSurface);
 
             _canvasEmptyLabel = new Label("Open a PSD to display the canvas.");
             _canvasEmptyLabel.style.position = Position.Absolute;
@@ -176,7 +269,17 @@ namespace PsdTools.UIToolKit
             body.Add(leftPanel);
             body.Add(centerPanel);
             body.Add(rightPanel);
+            UpdatePreviewModeButtons();
             return body;
+        }
+
+        private static VisualElement CreatePreviewViewport()
+        {
+            VisualElement viewport = new VisualElement();
+            viewport.style.flexGrow = 1f;
+            viewport.style.overflow = Overflow.Hidden;
+            viewport.style.position = Position.Relative;
+            return viewport;
         }
 
         private VisualElement BuildStatusBar()
@@ -224,6 +327,7 @@ namespace PsdTools.UIToolKit
                 _configData = PsdUiToolkitConfigStore.LoadAndSync(_psdPath, _psd);
                 PsdUiToolkitConfigStore.ApplyToPsd(_psd, _configData);
                 _configMap = new PsdUiToolkitLayerConfigMap(_configData);
+                _layoutHistory.Reset(_configData);
                 _selectedLayer = _psd.Children.Count > 0 ? _psd.Children[0] : null;
                 _selectedLayers.Clear();
                 if (_selectedLayer != null)
@@ -248,11 +352,13 @@ namespace PsdTools.UIToolKit
         {
             DestroySelectedPreview();
             DestroyCompositePreview();
+            DestroyLayoutPreviewCache();
             _selectedLayer = null;
             _selectedLayers.Clear();
             _selectedVirtualGroup = null;
             _layoutSuggestions.Clear();
             _currentLayoutTree = null;
+            _layoutHistory.Clear();
             _configMap = null;
             _configData = null;
             _psd?.ReleaseAllData();
@@ -260,6 +366,7 @@ namespace PsdTools.UIToolKit
             _canvasClickCandidates.Clear();
             if (_canvasImage != null)
                 _canvasImage.image = null;
+            _layoutCanvasSurface?.Clear();
         }
 
         private void RefreshView()
@@ -268,6 +375,7 @@ namespace PsdTools.UIToolKit
             RebuildInspector();
             UpdatePreview();
             UpdateCanvasGeometry();
+            UpdateHistoryButtons();
         }
 
         private void RebuildLayerTree()
@@ -367,8 +475,20 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitLayoutSuggestion suggestion = node.SourceLayer?.LayerId == null
                 ? null
                 : FindLayerSuggestion(node.SourceLayer.LayerId.Value);
-            string suggestionMarker = suggestion == null ? string.Empty : $" [Suggested {suggestion.Layout}]";
-            row.text = $"{exportMarker}{visibilityMarker}{new string(' ', depth * 2)}{prefix}{nodeName} ({kindLabel}){suggestionMarker}";
+            string suggestionMarker = suggestion == null
+                ? string.Empty
+                : $" [SUGGEST {suggestion.Layout.ToString().ToUpperInvariant()}]";
+            string warningMarker = NodeHasWarning(node, nodeName) ? " [!]" : string.Empty;
+            string roleMarker = node.ItemRole == PsdUiToolkitItemRole.Background
+                ? " [BG]"
+                : (node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute ? " [FLOAT]" : string.Empty);
+            string layoutMarker = node.LayoutType == PsdUiToolkitLayoutType.Row
+                ? "[ROW] "
+                : (node.LayoutType == PsdUiToolkitLayoutType.Column
+                    ? "[COL] "
+                    : "[ABS] ");
+            row.text =
+                $"{exportMarker}{visibilityMarker}{new string(' ', depth * 2)}{layoutMarker}{prefix}{nodeName} ({kindLabel}){roleMarker}{suggestionMarker}{warningMarker}";
             row.tooltip = string.IsNullOrEmpty(node.RebuildReason)
                 ? node.AnalysisSummary
                 : $"{node.RebuildReason}\n{node.AnalysisSummary}";
@@ -381,6 +501,63 @@ namespace PsdTools.UIToolKit
 
             for (int i = 0; i < node.Children.Count; i++)
                 AddLayoutNodeRow(node.Children[i], depth + 1);
+        }
+
+        private bool NodeHasWarning(PsdUiToolkitLayoutNode node, string nodeName)
+        {
+            if (_currentLayoutTree == null)
+                return false;
+
+            string groupId = node?.VirtualGroupId;
+            int layerId = node?.SourceLayer?.LayerId ?? -1;
+            for (int i = 0; i < _currentLayoutTree.Diagnostics.Count; i++)
+            {
+                PsdUiToolkitLayoutDiagnostic diagnostic =
+                    _currentLayoutTree.Diagnostics[i];
+                if ((layerId >= 0 && diagnostic.LayerId == layerId)
+                    || (!string.IsNullOrEmpty(groupId)
+                        && diagnostic.VirtualGroupId == groupId))
+                {
+                    return true;
+                }
+            }
+
+            for (int i = 0; i < _currentLayoutTree.Warnings.Count; i++)
+            {
+                string warning = _currentLayoutTree.Warnings[i] ?? string.Empty;
+                if (!string.IsNullOrEmpty(nodeName)
+                    && warning.IndexOf(nodeName, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+                if (!string.IsNullOrEmpty(groupId)
+                    && warning.IndexOf(groupId, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void AddLayoutDiagnostics(int layerId = -1, string virtualGroupId = null)
+        {
+            if (_currentLayoutTree == null)
+                return;
+
+            for (int i = 0; i < _currentLayoutTree.Diagnostics.Count; i++)
+            {
+                PsdUiToolkitLayoutDiagnostic diagnostic =
+                    _currentLayoutTree.Diagnostics[i];
+                if ((layerId >= 0 && diagnostic.LayerId == layerId)
+                    || (!string.IsNullOrEmpty(virtualGroupId)
+                        && diagnostic.VirtualGroupId == virtualGroupId))
+                {
+                    _inspectorScroll.Add(new HelpBox(
+                        diagnostic.Message,
+                        HelpBoxMessageType.Warning));
+                }
+            }
         }
 
         private bool NodeContainsAnySelectedLayer(PsdUiToolkitLayoutNode node)
@@ -510,13 +687,14 @@ namespace PsdTools.UIToolKit
             Toggle visibleToggle = new Toggle("Visible") { value = config.visible };
             visibleToggle.RegisterValueChangedCallback(evt =>
             {
-                config.visible = evt.newValue;
-                _selectedLayer.Visible = evt.newValue;
-                PersistConfig();
-                RefreshLayoutSuggestions();
-                RefreshCompositePreview();
-                RefreshView();
-            });
+                    config.visible = evt.newValue;
+                    _selectedLayer.Visible = evt.newValue;
+                    PersistConfig();
+                    RefreshLayoutSuggestions();
+                    DestroyLayoutPreviewCache();
+                    RefreshCompositePreview();
+                    RefreshView();
+                });
             _inspectorScroll.Add(visibleToggle);
 
             if (_selectedLayer.IsGroup)
@@ -525,7 +703,9 @@ namespace PsdTools.UIToolKit
                 mergeToggle.RegisterValueChangedCallback(evt =>
                 {
                     config.merge = evt.newValue;
-                    PersistLayoutConfigAndRefreshSuggestions();
+                    PersistConfig();
+                    RefreshLayoutSuggestions();
+                    RefreshView();
                 });
                 _inspectorScroll.Add(mergeToggle);
             }
@@ -670,23 +850,57 @@ namespace PsdTools.UIToolKit
                 return;
 
             _inspectorScroll.Add(new Label("Layout Intent") { style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 10f } });
+            AddLayoutDiagnostics(_selectedLayer?.LayerId ?? -1);
 
-            EnumField itemRoleField = new EnumField("In parent", config.itemRole);
+            DropdownField itemRoleField = new DropdownField(
+                "In parent",
+                new List<string>(ItemRoleChoices),
+                (int)config.itemRole);
             itemRoleField.RegisterValueChangedCallback(evt =>
             {
-                config.itemRole = (PsdUiToolkitItemRole)evt.newValue;
-                PersistLayoutConfigAndRefreshSuggestions();
+                PsdUiToolkitItemRole value =
+                    (PsdUiToolkitItemRole)itemRoleField.choices.IndexOf(evt.newValue);
+                ApplyLayoutMutation(() => config.itemRole = value);
             });
             _inspectorScroll.Add(itemRoleField);
 
-            EnumField childrenLayoutField = new EnumField("Arrange children", config.childrenLayout);
-            childrenLayoutField.SetEnabled(_selectedLayer != null && _selectedLayer.IsGroup && !config.merge);
+            DropdownField childrenLayoutField = new DropdownField(
+                "Arrange children",
+                new List<string>(ContainerLayoutChoices),
+                (int)config.childrenLayout);
+            bool canArrangeChildren =
+                _selectedLayer != null && _selectedLayer.IsGroup && !config.merge;
+            childrenLayoutField.SetEnabled(canArrangeChildren);
             childrenLayoutField.RegisterValueChangedCallback(evt =>
             {
-                config.childrenLayout = (PsdUiToolkitContainerLayout)evt.newValue;
-                PersistLayoutConfigAndRefreshSuggestions();
+                PsdUiToolkitContainerLayout value =
+                    (PsdUiToolkitContainerLayout)childrenLayoutField.choices.IndexOf(evt.newValue);
+                ApplyLayoutMutation(() => config.childrenLayout = value);
             });
             _inspectorScroll.Add(childrenLayoutField);
+
+            if (_selectedLayer == null || !_selectedLayer.IsGroup)
+            {
+                _inspectorScroll.Add(new HelpBox(
+                    "This node is a leaf and has no editable children. Select a PSD Group to arrange children.",
+                    HelpBoxMessageType.Info));
+            }
+            else if (config.merge)
+            {
+                _inspectorScroll.Add(new HelpBox(
+                    "Merge export turns this Group into one image. Turn off Merge export to arrange its children.",
+                    HelpBoxMessageType.Warning));
+            }
+
+            bool canConfigureAxes = canArrangeChildren
+                && (config.childrenLayout == PsdUiToolkitContainerLayout.Row
+                    || config.childrenLayout == PsdUiToolkitContainerLayout.Column);
+            AddAxisLayoutFields(
+                config.mainAxisDistribution,
+                config.crossAxisAlignment,
+                canConfigureAxes,
+                main => ApplyLayoutMutation(() => config.mainAxisDistribution = main),
+                cross => ApplyLayoutMutation(() => config.crossAxisAlignment = cross));
 
             PsdUiToolkitLayoutSuggestion suggestion = _selectedLayer?.LayerId == null
                 ? null
@@ -702,6 +916,45 @@ namespace PsdTools.UIToolKit
             }
         }
 
+        private void AddAxisLayoutFields(
+            PsdUiToolkitMainAxisDistribution mainAxis,
+            PsdUiToolkitCrossAxisAlignment crossAxis,
+            bool enabled,
+            Action<PsdUiToolkitMainAxisDistribution> onMainChanged,
+            Action<PsdUiToolkitCrossAxisAlignment> onCrossChanged)
+        {
+            DropdownField mainAxisField = new DropdownField(
+                "Main axis",
+                new List<string>(MainAxisChoices),
+                (int)mainAxis);
+            mainAxisField.SetEnabled(enabled);
+            mainAxisField.RegisterValueChangedCallback(evt =>
+            {
+                int index = mainAxisField.choices.IndexOf(evt.newValue);
+                onMainChanged?.Invoke((PsdUiToolkitMainAxisDistribution)Math.Max(0, index));
+            });
+            _inspectorScroll.Add(mainAxisField);
+
+            DropdownField crossAxisField = new DropdownField(
+                "Cross axis",
+                new List<string>(CrossAxisChoices),
+                (int)crossAxis);
+            crossAxisField.SetEnabled(enabled);
+            crossAxisField.RegisterValueChangedCallback(evt =>
+            {
+                int index = crossAxisField.choices.IndexOf(evt.newValue);
+                onCrossChanged?.Invoke((PsdUiToolkitCrossAxisAlignment)Math.Max(0, index));
+            });
+            _inspectorScroll.Add(crossAxisField);
+
+            if (!enabled)
+            {
+                _inspectorScroll.Add(new HelpBox(
+                    "Main-axis distribution and cross-axis alignment are available after choosing Row or Column.",
+                    HelpBoxMessageType.Info));
+            }
+        }
+
         private void AddMultiSelectionInspector()
         {
             _inspectorScroll.Add(new Label("Multiple Selection") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
@@ -710,7 +963,13 @@ namespace PsdTools.UIToolKit
                 "Only sibling layers can be wrapped in a layout group. Hold Ctrl or Cmd while clicking tree or canvas nodes.",
                 HelpBoxMessageType.Info));
 
-            Button createRow = new Button(() => CreateVirtualGroupFromLayers(_selectedLayers, PsdUiToolkitContainerLayout.Row))
+            string validationError = GetVirtualGroupSelectionError(_selectedLayers);
+            if (!string.IsNullOrEmpty(validationError))
+                _inspectorScroll.Add(new HelpBox(validationError, HelpBoxMessageType.Warning));
+
+            Button createRow = new Button(() => CreateVirtualGroupFromLayers(
+                _selectedLayers,
+                PsdUiToolkitContainerLayout.Row))
             {
                 text = "Create Row Group",
             };
@@ -718,23 +977,185 @@ namespace PsdTools.UIToolKit
             {
                 text = "Create Column Group",
             };
+            createRow.SetEnabled(string.IsNullOrEmpty(validationError));
+            createColumn.SetEnabled(string.IsNullOrEmpty(validationError));
             _inspectorScroll.Add(createRow);
             _inspectorScroll.Add(createColumn);
+
+            AddCompatibleVirtualGroupTargets();
+        }
+
+        private string GetVirtualGroupSelectionError(
+            IEnumerable<Layer> selectedLayers,
+            PsdUiToolkitVirtualGroupConfig targetGroup = null)
+        {
+            List<Layer> layers = new List<Layer>();
+            HashSet<int> ids = new HashSet<int>();
+            foreach (Layer layer in selectedLayers)
+            {
+                if (layer?.LayerId != null && ids.Add(layer.LayerId.Value))
+                    layers.Add(layer);
+            }
+
+            int minimum = targetGroup == null ? 2 : 1;
+            if (layers.Count < minimum)
+                return targetGroup == null
+                    ? "Select at least two sibling layers."
+                    : "Select at least one sibling layer to add.";
+
+            if (!TryGetParentLayerId(layers[0], out int parentLayerId))
+                return "Could not resolve the selected layer parent.";
+            if (targetGroup != null && targetGroup.parentLayerId != parentLayerId)
+                return "Selected layers must share the layout group's direct parent.";
+
+            for (int i = 1; i < layers.Count; i++)
+            {
+                if (!TryGetParentLayerId(layers[i], out int currentParentId)
+                    || currentParentId != parentLayerId)
+                {
+                    return "All selected layers must share the same direct parent.";
+                }
+            }
+
+            PsdUiToolkitVirtualGroupConfig[] groups = EnsureConfigData().virtualGroups;
+            for (int i = 0; i < groups.Length; i++)
+            {
+                PsdUiToolkitVirtualGroupConfig existing = groups[i];
+                if (existing == null || existing.id == targetGroup?.id)
+                    continue;
+
+                for (int memberIndex = 0; memberIndex < existing.memberLayerIds.Length; memberIndex++)
+                {
+                    if (ids.Contains(existing.memberLayerIds[memberIndex]))
+                        return $"A selected layer already belongs to layout group '{existing.name}'.";
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private void AddCompatibleVirtualGroupTargets()
+        {
+            PsdUiToolkitVirtualGroupConfig[] groups = EnsureConfigData().virtualGroups;
+            bool addedHeader = false;
+            for (int i = 0; i < groups.Length; i++)
+            {
+                PsdUiToolkitVirtualGroupConfig group = groups[i];
+                if (group == null
+                    || !string.IsNullOrEmpty(GetVirtualGroupSelectionError(_selectedLayers, group))
+                    || SelectionAlreadyInGroup(_selectedLayers, group))
+                {
+                    continue;
+                }
+
+                if (!addedHeader)
+                {
+                    _inspectorScroll.Add(new Label("Add to existing group")
+                    {
+                        style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 8f },
+                    });
+                    addedHeader = true;
+                }
+
+                Button addButton = new Button(() => AddMembersToVirtualGroup(group, _selectedLayers))
+                {
+                    text = group.name,
+                };
+                _inspectorScroll.Add(addButton);
+            }
+        }
+
+        private static bool SelectionAlreadyInGroup(
+            IEnumerable<Layer> selectedLayers,
+            PsdUiToolkitVirtualGroupConfig group)
+        {
+            HashSet<int> members = new HashSet<int>(group.memberLayerIds);
+            foreach (Layer layer in selectedLayers)
+            {
+                if (layer?.LayerId != null && !members.Contains(layer.LayerId.Value))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private void AddMembersToVirtualGroup(
+            PsdUiToolkitVirtualGroupConfig group,
+            IEnumerable<Layer> selectedLayers)
+        {
+            string error = GetVirtualGroupSelectionError(selectedLayers, group);
+            if (!string.IsNullOrEmpty(error))
+            {
+                EditorUtility.DisplayDialog("Layout Group", error, "OK");
+                return;
+            }
+
+            Dictionary<int, Layer> members = new Dictionary<int, Layer>();
+            for (int i = 0; i < group.memberLayerIds.Length; i++)
+            {
+                Layer layer = FindLayerById(group.memberLayerIds[i]);
+                if (layer != null)
+                    members[group.memberLayerIds[i]] = layer;
+            }
+            foreach (Layer layer in selectedLayers)
+            {
+                if (layer?.LayerId != null)
+                    members[layer.LayerId.Value] = layer;
+            }
+
+            List<Layer> ordered = new List<Layer>(members.Values);
+            ordered.Sort(group.layout == PsdUiToolkitContainerLayout.Column
+                ? (Comparison<Layer>)CompareLayersByTopThenLeft
+                : CompareLayersByLeftThenTop);
+            int[] memberIds = new int[ordered.Count];
+            for (int i = 0; i < ordered.Count; i++)
+                memberIds[i] = ordered[i].LayerId.Value;
+
+            ApplyLayoutMutation(() =>
+            {
+                group.memberLayerIds = memberIds;
+                _selectedVirtualGroup = group;
+                _selectedLayers.Clear();
+                _selectedLayer = null;
+            });
+        }
+
+        private void RemoveMemberFromVirtualGroup(
+            PsdUiToolkitVirtualGroupConfig group,
+            int memberLayerId)
+        {
+            List<int> memberIds = new List<int>();
+            for (int i = 0; i < group.memberLayerIds.Length; i++)
+            {
+                if (group.memberLayerIds[i] != memberLayerId)
+                    memberIds.Add(group.memberLayerIds[i]);
+            }
+
+            if (memberIds.Count < 2)
+            {
+                DissolveVirtualGroup(group);
+                UpdateStatus("The layout group was dissolved because fewer than two members remained.");
+                return;
+            }
+
+            ApplyLayoutMutation(() => group.memberLayerIds = memberIds.ToArray());
         }
 
         private void AddVirtualGroupInspector(PsdUiToolkitVirtualGroupConfig group)
         {
             _inspectorScroll.Add(new Label("Virtual Layout Group") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
-            TextField nameField = new TextField("Name") { value = group.name };
+            AddLayoutDiagnostics(virtualGroupId: group.id);
+            TextField nameField = new TextField("Name")
+            {
+                value = group.name,
+                isDelayed = true,
+            };
             nameField.RegisterValueChangedCallback(evt =>
             {
-                group.name = evt.newValue ?? string.Empty;
-                PersistConfig();
-                RebuildLayerTree();
+                string value = evt.newValue ?? string.Empty;
+                ApplyLayoutMutation(() => group.name = value);
             });
             _inspectorScroll.Add(nameField);
-            _inspectorScroll.Add(new Label($"Members: {group.memberLayerIds.Length}"));
-            _inspectorScroll.Add(new Label($"Current layout: {group.layout}"));
 
             VisualElement layoutButtons = new VisualElement { style = { flexDirection = FlexDirection.Row } };
             Button rowButton = new Button(() => SetVirtualGroupLayout(group, PsdUiToolkitContainerLayout.Row))
@@ -750,6 +1171,38 @@ namespace PsdTools.UIToolKit
             layoutButtons.Add(rowButton);
             layoutButtons.Add(columnButton);
             _inspectorScroll.Add(layoutButtons);
+
+            AddAxisLayoutFields(
+                group.mainAxisDistribution,
+                group.crossAxisAlignment,
+                true,
+                main => ApplyLayoutMutation(() => group.mainAxisDistribution = main),
+                cross => ApplyLayoutMutation(() => group.crossAxisAlignment = cross));
+
+            _inspectorScroll.Add(new Label("Members")
+            {
+                style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 8f },
+            });
+            for (int i = 0; i < group.memberLayerIds.Length; i++)
+            {
+                int memberId = group.memberLayerIds[i];
+                Layer member = FindLayerById(memberId);
+                VisualElement memberRow = new VisualElement
+                {
+                    style = { flexDirection = FlexDirection.Row },
+                };
+                Label memberLabel = new Label(member == null
+                    ? $"Missing layer #{memberId}"
+                    : member.Name);
+                memberLabel.style.flexGrow = 1f;
+                Button removeButton = new Button(() => RemoveMemberFromVirtualGroup(group, memberId))
+                {
+                    text = "Remove",
+                };
+                memberRow.Add(memberLabel);
+                memberRow.Add(removeButton);
+                _inspectorScroll.Add(memberRow);
+            }
 
             Button dissolveButton = new Button(() => DissolveVirtualGroup(group))
             {
@@ -839,8 +1292,12 @@ namespace PsdTools.UIToolKit
                 return;
 
             PsdUiToolkitLayerConfig config = GetOrCreateLayerConfig(layer);
-            config.childrenLayout = suggestion.Layout;
-            PersistLayoutConfigAndRefreshSuggestions();
+            ApplyLayoutMutation(() =>
+            {
+                config.childrenLayout = suggestion.Layout;
+                config.mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
+                config.crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd;
+            });
         }
 
         private void ApplyVirtualSuggestion(PsdUiToolkitLayoutSuggestion suggestion)
@@ -936,21 +1393,50 @@ namespace PsdTools.UIToolKit
             {
                 group,
             };
-            data.virtualGroups = groups.ToArray();
-            _selectedLayers.Clear();
-            _selectedLayer = null;
-            _selectedVirtualGroup = group;
-            PersistLayoutConfigAndRefreshSuggestions();
+            ApplyLayoutMutation(() =>
+            {
+                data.virtualGroups = groups.ToArray();
+                _selectedLayers.Clear();
+                _selectedLayer = null;
+                _selectedVirtualGroup = group;
+            });
         }
 
         private void SetVirtualGroupLayout(
             PsdUiToolkitVirtualGroupConfig group,
             PsdUiToolkitContainerLayout layout)
         {
-            group.layout = layout == PsdUiToolkitContainerLayout.Column
-                ? PsdUiToolkitContainerLayout.Column
-                : PsdUiToolkitContainerLayout.Row;
-            PersistLayoutConfigAndRefreshSuggestions();
+            ApplyLayoutMutation(() =>
+            {
+                group.layout = layout == PsdUiToolkitContainerLayout.Column
+                    ? PsdUiToolkitContainerLayout.Column
+                    : PsdUiToolkitContainerLayout.Row;
+                SortVirtualGroupMemberIds(group);
+            });
+        }
+
+        private void SortVirtualGroupMemberIds(PsdUiToolkitVirtualGroupConfig group)
+        {
+            List<Layer> members = new List<Layer>();
+            List<int> missingMemberIds = new List<int>();
+            for (int i = 0; i < group.memberLayerIds.Length; i++)
+            {
+                Layer layer = FindLayerById(group.memberLayerIds[i]);
+                if (layer != null)
+                    members.Add(layer);
+                else
+                    missingMemberIds.Add(group.memberLayerIds[i]);
+            }
+
+            members.Sort(group.layout == PsdUiToolkitContainerLayout.Column
+                ? (Comparison<Layer>)CompareLayersByTopThenLeft
+                : CompareLayersByLeftThenTop);
+            int[] memberIds = new int[members.Count + missingMemberIds.Count];
+            for (int i = 0; i < members.Count; i++)
+                memberIds[i] = members[i].LayerId.Value;
+            for (int i = 0; i < missingMemberIds.Count; i++)
+                memberIds[members.Count + i] = missingMemberIds[i];
+            group.memberLayerIds = memberIds;
         }
 
         private void DissolveVirtualGroup(PsdUiToolkitVirtualGroupConfig group)
@@ -963,13 +1449,17 @@ namespace PsdTools.UIToolKit
                     groups.Add(data.virtualGroups[i]);
             }
 
-            data.virtualGroups = groups.ToArray();
-            _selectedVirtualGroup = null;
-            _selectedLayers.Clear();
-            _selectedLayer = group.memberLayerIds.Length == 0 ? null : FindLayerById(group.memberLayerIds[0]);
-            if (_selectedLayer != null)
-                _selectedLayers.Add(_selectedLayer);
-            PersistLayoutConfigAndRefreshSuggestions();
+            ApplyLayoutMutation(() =>
+            {
+                data.virtualGroups = groups.ToArray();
+                _selectedVirtualGroup = null;
+                _selectedLayers.Clear();
+                _selectedLayer = group.memberLayerIds.Length == 0
+                    ? null
+                    : FindLayerById(group.memberLayerIds[0]);
+                if (_selectedLayer != null)
+                    _selectedLayers.Add(_selectedLayer);
+            });
         }
 
         private void SelectVirtualGroup(string groupId)
@@ -996,11 +1486,68 @@ namespace PsdTools.UIToolKit
             return null;
         }
 
-        private void PersistLayoutConfigAndRefreshSuggestions()
+        private void ApplyLayoutMutation(Action mutation)
         {
+            if (mutation == null || _configData == null)
+                return;
+
+            mutation();
+            PersistConfig();
+            _layoutHistory.Record(_configData);
+            RefreshLayoutSuggestions();
+            RefreshView();
+        }
+
+        private void UndoLayoutEdit()
+        {
+            RestoreLayoutHistory(true);
+        }
+
+        private void RedoLayoutEdit()
+        {
+            RestoreLayoutHistory(false);
+        }
+
+        private void RestoreLayoutHistory(bool undo)
+        {
+            if (_configData == null)
+                return;
+
+            string selectedGroupId = _selectedVirtualGroup?.id;
+            bool changed = undo
+                ? _layoutHistory.Undo(_configData)
+                : _layoutHistory.Redo(_configData);
+            if (!changed)
+                return;
+
+            _selectedVirtualGroup = string.IsNullOrEmpty(selectedGroupId)
+                ? null
+                : FindVirtualGroup(selectedGroupId);
             PersistConfig();
             RefreshLayoutSuggestions();
             RefreshView();
+            UpdateStatus(undo ? "Undid layout edit." : "Redid layout edit.");
+        }
+
+        private void OnRootKeyDown(KeyDownEvent evt)
+        {
+            if (evt.keyCode != KeyCode.Z || !(evt.ctrlKey || evt.commandKey))
+                return;
+            if (rootVisualElement.focusController?.focusedElement is TextField)
+                return;
+
+            if (evt.shiftKey)
+                RedoLayoutEdit();
+            else
+                UndoLayoutEdit();
+            evt.StopPropagation();
+            evt.PreventDefault();
+        }
+
+        private void UpdateHistoryButtons()
+        {
+            _undoButton?.SetEnabled(_layoutHistory.CanUndo);
+            _redoButton?.SetEnabled(_layoutHistory.CanRedo);
         }
 
         private PsdUiToolkitLayoutTree BuildCurrentAnalysisTree(string rootName)
@@ -1220,38 +1767,466 @@ namespace PsdTools.UIToolKit
             _psdCompositePreview = null;
         }
 
+        private void SetCanvasPreviewMode(CanvasPreviewMode mode)
+        {
+            if (_canvasPreviewMode == mode)
+                return;
+
+            _canvasPreviewMode = mode;
+            UpdatePreviewModeButtons();
+            UpdateCanvasGeometry();
+            _canvasViewport?.schedule.Execute(UpdateCanvasGeometry);
+        }
+
+        private void UpdatePreviewModeButtons()
+        {
+            Color selected = new Color(0.18f, 0.35f, 0.58f, 0.75f);
+            Color normal = new Color(0f, 0f, 0f, 0f);
+            if (_psdPreviewButton != null)
+                _psdPreviewButton.style.backgroundColor =
+                    _canvasPreviewMode == CanvasPreviewMode.Psd ? selected : normal;
+            if (_layoutPreviewButton != null)
+                _layoutPreviewButton.style.backgroundColor =
+                    _canvasPreviewMode == CanvasPreviewMode.Layout ? selected : normal;
+            if (_splitPreviewButton != null)
+                _splitPreviewButton.style.backgroundColor =
+                    _canvasPreviewMode == CanvasPreviewMode.Split ? selected : normal;
+        }
+
         private void UpdateCanvasGeometry()
         {
-            if (_canvasViewport == null || _canvasSurface == null)
+            if (_canvasViewport == null
+                || _psdCanvasViewport == null
+                || _layoutCanvasViewport == null
+                || _canvasSurface == null
+                || _layoutCanvasSurface == null)
+            {
                 return;
+            }
 
             bool hasPsd = _psd != null && _psd.Width > 0 && _psd.Height > 0;
             if (_canvasEmptyLabel != null)
                 _canvasEmptyLabel.style.display = hasPsd ? DisplayStyle.None : DisplayStyle.Flex;
-            _canvasSurface.style.display = hasPsd ? DisplayStyle.Flex : DisplayStyle.None;
+            bool showPsd = hasPsd && _canvasPreviewMode != CanvasPreviewMode.Layout;
+            bool showLayout = hasPsd && _canvasPreviewMode != CanvasPreviewMode.Psd;
+            _psdCanvasViewport.style.display = showPsd ? DisplayStyle.Flex : DisplayStyle.None;
+            _layoutCanvasViewport.style.display = showLayout ? DisplayStyle.Flex : DisplayStyle.None;
+            _canvasSurface.style.display = showPsd ? DisplayStyle.Flex : DisplayStyle.None;
+            _layoutCanvasSurface.style.display = showLayout ? DisplayStyle.Flex : DisplayStyle.None;
             if (_canvasTitleLabel != null)
-                _canvasTitleLabel.text = hasPsd ? $"Canvas Preview  {_psd.Width} x {_psd.Height}" : "Canvas Preview";
+            {
+                _canvasTitleLabel.text = hasPsd
+                    ? $"Canvas Preview  {_psd.Width} x {_psd.Height}  ({_canvasPreviewMode})"
+                    : "Canvas Preview";
+            }
             if (!hasPsd)
             {
                 _canvasOverlay?.Clear();
+                _layoutCanvasSurface.Clear();
                 return;
             }
 
-            Rect viewport = _canvasViewport.contentRect;
-            if (viewport.width <= 0f || viewport.height <= 0f || float.IsNaN(viewport.width) || float.IsNaN(viewport.height))
-                return;
-
-            float scale = Mathf.Min(viewport.width / _psd.Width, viewport.height / _psd.Height);
-            _canvasDrawWidth = _psd.Width * scale;
-            _canvasDrawHeight = _psd.Height * scale;
-            _canvasSurface.style.left = (viewport.width - _canvasDrawWidth) * 0.5f;
-            _canvasSurface.style.top = (viewport.height - _canvasDrawHeight) * 0.5f;
-            _canvasSurface.style.width = _canvasDrawWidth;
-            _canvasSurface.style.height = _canvasDrawHeight;
-            if (_canvasImage != null)
-                _canvasImage.image = _psdCompositePreview;
+            if (showPsd)
+            {
+                FitPreviewSurface(
+                    _psdCanvasViewport,
+                    _canvasSurface,
+                    out _canvasDrawWidth,
+                    out _canvasDrawHeight);
+                if (_canvasImage != null)
+                    _canvasImage.image = _psdCompositePreview;
+            }
+            else
+            {
+                _canvasDrawWidth = 0f;
+                _canvasDrawHeight = 0f;
+            }
 
             RebuildCanvasOverlays();
+
+            if (showLayout)
+            {
+                FitPreviewSurface(
+                    _layoutCanvasViewport,
+                    _layoutCanvasSurface,
+                    out _layoutCanvasDrawWidth,
+                    out _layoutCanvasDrawHeight);
+                RebuildLayoutPreview();
+            }
+            else
+            {
+                _layoutCanvasDrawWidth = 0f;
+                _layoutCanvasDrawHeight = 0f;
+                _layoutCanvasSurface.Clear();
+            }
+        }
+
+        private void FitPreviewSurface(
+            VisualElement viewport,
+            VisualElement surface,
+            out float drawWidth,
+            out float drawHeight)
+        {
+            drawWidth = 0f;
+            drawHeight = 0f;
+            Rect rect = viewport.contentRect;
+            if (rect.width <= 0f
+                || rect.height <= 0f
+                || float.IsNaN(rect.width)
+                || float.IsNaN(rect.height))
+            {
+                return;
+            }
+
+            float scale = Mathf.Min(rect.width / _psd.Width, rect.height / _psd.Height);
+            drawWidth = _psd.Width * scale;
+            drawHeight = _psd.Height * scale;
+            surface.style.left = (rect.width - drawWidth) * 0.5f;
+            surface.style.top = (rect.height - drawHeight) * 0.5f;
+            surface.style.width = drawWidth;
+            surface.style.height = drawHeight;
+        }
+
+        private void RebuildLayoutPreview()
+        {
+            _layoutCanvasSurface?.Clear();
+            _layoutCanvasRoot = null;
+            if (_layoutCanvasSurface == null
+                || _currentLayoutTree == null
+                || _configMap == null
+                || _layoutCanvasDrawWidth <= 0f
+                || _layoutCanvasDrawHeight <= 0f)
+            {
+                return;
+            }
+
+            float scale = _layoutCanvasDrawWidth / Math.Max(1, _currentLayoutTree.Width);
+            _layoutCanvasRoot = new VisualElement();
+            _layoutCanvasRoot.style.position = Position.Absolute;
+            _layoutCanvasRoot.style.left = 0f;
+            _layoutCanvasRoot.style.top = 0f;
+            _layoutCanvasRoot.style.width = _layoutCanvasDrawWidth;
+            _layoutCanvasRoot.style.height = _layoutCanvasDrawHeight;
+            _layoutCanvasRoot.style.overflow = Overflow.Hidden;
+            _layoutCanvasSurface.Add(_layoutCanvasRoot);
+
+            for (int i = 0; i < _currentLayoutTree.Children.Count; i++)
+            {
+                VisualElement child = BuildLayoutPreviewNode(
+                    _currentLayoutTree.Children[i],
+                    0,
+                    0,
+                    PsdUiToolkitFlowChildPlacement.Absolute,
+                    scale);
+                if (child != null)
+                    _layoutCanvasRoot.Add(child);
+            }
+        }
+
+        private VisualElement BuildLayoutPreviewNode(
+            PsdUiToolkitLayoutNode node,
+            int parentLeft,
+            int parentTop,
+            PsdUiToolkitFlowChildPlacement placement,
+            float scale)
+        {
+            if (node == null)
+                return null;
+
+            Layer layer = node.SourceLayer;
+            VisualElement element = new VisualElement
+            {
+                name = string.IsNullOrEmpty(node.DisplayName)
+                    ? (layer?.Name ?? "LayoutNode")
+                    : node.DisplayName,
+            };
+            PsdUiToolkitLayerBounds bounds = node.Bounds;
+            element.style.width = Math.Max(0f, bounds.Width * scale);
+            element.style.height = Math.Max(0f, bounds.Height * scale);
+
+            if (placement.UseFlow)
+            {
+                element.style.position = Position.Relative;
+                element.style.marginLeft = placement.MarginLeft * scale;
+                element.style.marginTop = placement.MarginTop * scale;
+                element.style.flexShrink = 0f;
+            }
+            else
+            {
+                element.style.position = Position.Absolute;
+                element.style.left = (bounds.Left - parentLeft) * scale;
+                element.style.top = (bounds.Top - parentTop) * scale;
+            }
+
+            if (layer != null)
+            {
+                element.style.opacity = layer.OpacityFloat;
+                element.style.display = _configMap.IsVisible(layer)
+                    ? DisplayStyle.Flex
+                    : DisplayStyle.None;
+            }
+
+            PsdUiToolkitFlowContainerPlan flowPlan =
+                PsdUiToolkitFlowLayoutResolver.Resolve(node, _configMap);
+            ApplyLayoutPreviewContainerStyle(element, flowPlan, scale);
+            AddLayoutPreviewContent(element, node);
+
+            element.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.button != 0)
+                    return;
+                if (node.SourceLayer != null)
+                    SelectLayer(node.SourceLayer, true, evt.ctrlKey || evt.commandKey);
+                else if (!string.IsNullOrEmpty(node.VirtualGroupId))
+                    SelectVirtualGroup(node.VirtualGroupId);
+                evt.StopPropagation();
+            });
+
+            for (int i = 0; i < node.Children.Count; i++)
+            {
+                PsdUiToolkitLayoutNode childNode = node.Children[i];
+                PsdUiToolkitFlowChildPlacement childPlacement =
+                    flowPlan.UseFlow
+                    && flowPlan.Placements.TryGetValue(
+                        childNode,
+                        out PsdUiToolkitFlowChildPlacement resolved)
+                        ? resolved
+                        : PsdUiToolkitFlowChildPlacement.Absolute;
+                VisualElement child = BuildLayoutPreviewNode(
+                    childNode,
+                    bounds.Left,
+                    bounds.Top,
+                    childPlacement,
+                    scale);
+                if (child != null)
+                    element.Add(child);
+            }
+
+            ApplyLayoutPreviewOutline(element, node);
+            AddLayoutRoleBadge(element, node);
+            return element;
+        }
+
+        private static void ApplyLayoutPreviewContainerStyle(
+            VisualElement element,
+            PsdUiToolkitFlowContainerPlan plan,
+            float scale)
+        {
+            if (element == null || plan == null || !plan.UseFlow)
+                return;
+
+            element.style.flexDirection = plan.LayoutType == PsdUiToolkitLayoutType.Row
+                ? FlexDirection.Row
+                : FlexDirection.Column;
+            element.style.justifyContent = ResolvePreviewJustify(plan.MainAxisDistribution);
+            element.style.alignItems = ResolvePreviewAlign(plan.CrossAxisAlignment);
+            element.style.paddingLeft = plan.PaddingLeft * scale;
+            element.style.paddingTop = plan.PaddingTop * scale;
+            element.style.paddingRight = plan.PaddingRight * scale;
+            element.style.paddingBottom = plan.PaddingBottom * scale;
+        }
+
+        private static Justify ResolvePreviewJustify(
+            PsdUiToolkitMainAxisDistribution distribution)
+        {
+            switch (distribution)
+            {
+                case PsdUiToolkitMainAxisDistribution.Center:
+                    return Justify.Center;
+                case PsdUiToolkitMainAxisDistribution.End:
+                    return Justify.FlexEnd;
+                case PsdUiToolkitMainAxisDistribution.SpaceBetween:
+                    return Justify.SpaceBetween;
+                case PsdUiToolkitMainAxisDistribution.SpaceAround:
+                    return Justify.SpaceAround;
+                default:
+                    return Justify.FlexStart;
+            }
+        }
+
+        private static Align ResolvePreviewAlign(PsdUiToolkitCrossAxisAlignment alignment)
+        {
+            switch (alignment)
+            {
+                case PsdUiToolkitCrossAxisAlignment.Center:
+                    return Align.Center;
+                case PsdUiToolkitCrossAxisAlignment.End:
+                    return Align.FlexEnd;
+                default:
+                    return Align.FlexStart;
+            }
+        }
+
+        private void AddLayoutPreviewContent(
+            VisualElement element,
+            PsdUiToolkitLayoutNode node)
+        {
+            Layer layer = node.SourceLayer;
+            if (layer == null || node.Children.Count > 0)
+                return;
+
+            if (layer.Kind == LayerKind.Type)
+            {
+                TypeLayer typeLayer = (TypeLayer)layer;
+                Label text = new Label(typeLayer.Text ?? string.Empty)
+                {
+                    pickingMode = PickingMode.Ignore,
+                };
+                text.style.position = Position.Absolute;
+                text.style.left = 0f;
+                text.style.top = 0f;
+                text.style.right = 0f;
+                text.style.bottom = 0f;
+                text.style.unityTextAlign = TextAnchor.MiddleCenter;
+                text.style.whiteSpace = WhiteSpace.NoWrap;
+                text.style.fontSize = Math.Max(6f, typeLayer.EffectiveFontSize
+                    * _layoutCanvasDrawWidth / Math.Max(1, _psd.Width));
+                element.Add(text);
+                return;
+            }
+
+            Texture2D texture = GetLayoutPreviewTexture(layer);
+            if (texture != null)
+            {
+                Image image = new Image
+                {
+                    image = texture,
+                    scaleMode = ScaleMode.StretchToFill,
+                    pickingMode = PickingMode.Ignore,
+                };
+                image.style.position = Position.Absolute;
+                image.style.left = 0f;
+                image.style.top = 0f;
+                image.style.right = 0f;
+                image.style.bottom = 0f;
+                element.Add(image);
+                return;
+            }
+
+            Label placeholder = new Label(node.DisplayName)
+            {
+                pickingMode = PickingMode.Ignore,
+            };
+            placeholder.style.position = Position.Absolute;
+            placeholder.style.left = 0f;
+            placeholder.style.top = 0f;
+            placeholder.style.right = 0f;
+            placeholder.style.bottom = 0f;
+            placeholder.style.unityTextAlign = TextAnchor.MiddleCenter;
+            placeholder.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.45f);
+            element.Add(placeholder);
+        }
+
+        private Texture2D GetLayoutPreviewTexture(Layer layer)
+        {
+            if (layer?.LayerId == null || _psd == null)
+                return null;
+            int layerId = layer.LayerId.Value;
+            if (_layoutPreviewTextures.TryGetValue(layerId, out Texture2D cached))
+                return cached;
+
+            Texture2D texture = null;
+            try
+            {
+                texture = PsdUiToolkitRasterExporter.CreatePreviewTexture(_psd, layer);
+                if (texture != null)
+                    texture.hideFlags = HideFlags.HideAndDontSave;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning(
+                    $"[PsdUiToolkit] Failed to build layout preview for '{layer.Name}': {ex.Message}");
+            }
+            finally
+            {
+                _psd.ClearDecompressedCaches();
+            }
+
+            _layoutPreviewTextures[layerId] = texture;
+            return texture;
+        }
+
+        private void ApplyLayoutPreviewOutline(
+            VisualElement element,
+            PsdUiToolkitLayoutNode node)
+        {
+            Color color = Color.clear;
+            float width = 0f;
+            bool selected = node.SourceLayer != null
+                ? _selectedLayers.Contains(node.SourceLayer)
+                : _selectedVirtualGroup?.id == node.VirtualGroupId;
+            if (selected)
+            {
+                color = new Color(0.2f, 0.5f, 1f, 1f);
+                width = 2f;
+            }
+            else if (NodeHasWarning(node, node.DisplayName))
+            {
+                color = new Color(1f, 0.68f, 0.15f, 1f);
+                width = 2f;
+            }
+            else if (node.IsSynthetic)
+            {
+                color = new Color(0.3f, 0.85f, 0.55f, 0.9f);
+                width = 1f;
+            }
+
+            if (width <= 0f)
+                return;
+
+            VisualElement outline = new VisualElement
+            {
+                pickingMode = PickingMode.Ignore,
+            };
+            outline.style.position = Position.Absolute;
+            outline.style.left = 0f;
+            outline.style.top = 0f;
+            outline.style.right = 0f;
+            outline.style.bottom = 0f;
+            outline.style.borderLeftWidth = width;
+            outline.style.borderRightWidth = width;
+            outline.style.borderTopWidth = width;
+            outline.style.borderBottomWidth = width;
+            outline.style.borderLeftColor = color;
+            outline.style.borderRightColor = color;
+            outline.style.borderTopColor = color;
+            outline.style.borderBottomColor = color;
+            element.Add(outline);
+        }
+
+        private static void AddLayoutRoleBadge(
+            VisualElement element,
+            PsdUiToolkitLayoutNode node)
+        {
+            string text = node.ItemRole == PsdUiToolkitItemRole.Background
+                ? "BG"
+                : (node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute ? "FLOAT" : string.Empty);
+            if (string.IsNullOrEmpty(text))
+                return;
+
+            Label badge = new Label(text)
+            {
+                pickingMode = PickingMode.Ignore,
+            };
+            badge.style.position = Position.Absolute;
+            badge.style.left = 1f;
+            badge.style.top = 1f;
+            badge.style.fontSize = 8f;
+            badge.style.color = Color.white;
+            badge.style.backgroundColor = new Color(0.05f, 0.05f, 0.05f, 0.78f);
+            element.Add(badge);
+        }
+
+        private void DestroyLayoutPreviewCache()
+        {
+            foreach (KeyValuePair<int, Texture2D> entry in _layoutPreviewTextures)
+            {
+                if (entry.Value != null)
+                    Object.DestroyImmediate(entry.Value);
+            }
+
+            _layoutPreviewTextures.Clear();
+            _layoutCanvasRoot = null;
         }
 
         private void RebuildCanvasOverlays()

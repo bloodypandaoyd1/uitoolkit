@@ -4,6 +4,26 @@ using PsdTools.Layers;
 
 namespace PsdTools.UIToolKit
 {
+    internal sealed class PsdUiToolkitLayoutDiagnostic
+    {
+        public PsdUiToolkitLayoutDiagnostic(
+            string code,
+            string message,
+            int layerId = -1,
+            string virtualGroupId = null)
+        {
+            Code = code ?? string.Empty;
+            Message = message ?? string.Empty;
+            LayerId = layerId;
+            VirtualGroupId = virtualGroupId ?? string.Empty;
+        }
+
+        public string Code { get; }
+        public string Message { get; }
+        public int LayerId { get; }
+        public string VirtualGroupId { get; }
+    }
+
     internal sealed class PsdUiToolkitLayoutNode
     {
         public PsdUiToolkitLayoutNode(
@@ -19,7 +39,9 @@ namespace PsdTools.UIToolKit
             bool isSynthetic = false,
             string rebuildReason = null,
             PsdUiToolkitItemRole itemRole = PsdUiToolkitItemRole.FollowParent,
-            string virtualGroupId = null)
+            string virtualGroupId = null,
+            PsdUiToolkitMainAxisDistribution mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd,
+            PsdUiToolkitCrossAxisAlignment crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd)
         {
             SourceLayer = sourceLayer;
             Bounds = bounds;
@@ -36,6 +58,8 @@ namespace PsdTools.UIToolKit
             RebuildReason = rebuildReason ?? string.Empty;
             ItemRole = itemRole;
             VirtualGroupId = virtualGroupId ?? string.Empty;
+            MainAxisDistribution = mainAxisDistribution;
+            CrossAxisAlignment = crossAxisAlignment;
         }
 
         public Layer SourceLayer { get; }
@@ -51,6 +75,8 @@ namespace PsdTools.UIToolKit
         public string RebuildReason { get; }
         public PsdUiToolkitItemRole ItemRole { get; }
         public string VirtualGroupId { get; }
+        public PsdUiToolkitMainAxisDistribution MainAxisDistribution { get; }
+        public PsdUiToolkitCrossAxisAlignment CrossAxisAlignment { get; }
     }
 
     internal sealed class PsdUiToolkitLayoutTree
@@ -61,7 +87,8 @@ namespace PsdTools.UIToolKit
             int height,
             bool autoLayoutEnabled,
             List<PsdUiToolkitLayoutNode> children,
-            List<string> warnings = null)
+            List<string> warnings = null,
+            List<PsdUiToolkitLayoutDiagnostic> diagnostics = null)
         {
             RootName = rootName ?? string.Empty;
             Width = width;
@@ -69,6 +96,7 @@ namespace PsdTools.UIToolKit
             AutoLayoutEnabled = autoLayoutEnabled;
             Children = children ?? new List<PsdUiToolkitLayoutNode>();
             Warnings = warnings ?? new List<string>();
+            Diagnostics = diagnostics ?? new List<PsdUiToolkitLayoutDiagnostic>();
         }
 
         public string RootName { get; }
@@ -77,6 +105,7 @@ namespace PsdTools.UIToolKit
         public bool AutoLayoutEnabled { get; }
         public List<PsdUiToolkitLayoutNode> Children { get; }
         public List<string> Warnings { get; }
+        public List<PsdUiToolkitLayoutDiagnostic> Diagnostics { get; }
     }
 
     internal static class PsdUiToolkitAutoLayoutAnalyzer

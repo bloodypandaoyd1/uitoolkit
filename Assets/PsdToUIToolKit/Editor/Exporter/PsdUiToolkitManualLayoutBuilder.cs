@@ -39,6 +39,8 @@ namespace PsdTools.UIToolKit
                 throw new ArgumentNullException(nameof(configMap));
 
             List<string> warnings = new List<string>();
+            List<PsdUiToolkitLayoutDiagnostic> diagnostics =
+                new List<PsdUiToolkitLayoutDiagnostic>();
             HashSet<PsdUiToolkitVirtualGroupConfig> visitedGroups = new HashSet<PsdUiToolkitVirtualGroupConfig>();
             List<PsdUiToolkitLayoutNode> children = BuildChildren(
                 psd.Children,
@@ -47,6 +49,7 @@ namespace PsdTools.UIToolKit
                 rasterResult,
                 inspectorMode,
                 warnings,
+                diagnostics,
                 visitedGroups);
 
             PsdUiToolkitVirtualGroupConfig[] configuredGroups = configMap.GetVirtualGroups();
@@ -54,10 +57,24 @@ namespace PsdTools.UIToolKit
             {
                 PsdUiToolkitVirtualGroupConfig group = configuredGroups[i];
                 if (group != null && !visitedGroups.Contains(group))
-                    warnings.Add($"Layout group '{GetGroupName(group)}' has a missing or non-renderable parent and was ignored.");
+                {
+                    AddWarning(
+                        warnings,
+                        diagnostics,
+                        "MissingVirtualGroupParent",
+                        $"Layout group '{GetGroupName(group)}' has a missing or non-renderable parent and was ignored.",
+                        virtualGroupId: group.id);
+                }
             }
 
-            return new PsdUiToolkitLayoutTree(rootName, psd.Width, psd.Height, true, children, warnings);
+            return new PsdUiToolkitLayoutTree(
+                rootName,
+                psd.Width,
+                psd.Height,
+                true,
+                children,
+                warnings,
+                diagnostics);
         }
 
         private static List<PsdUiToolkitLayoutNode> BuildChildren(
@@ -67,6 +84,7 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitRasterExportResult rasterResult,
             bool inspectorMode,
             List<string> warnings,
+            List<PsdUiToolkitLayoutDiagnostic> diagnostics,
             HashSet<PsdUiToolkitVirtualGroupConfig> visitedGroups)
         {
             List<PsdUiToolkitLayoutNode> children = new List<PsdUiToolkitLayoutNode>();
@@ -80,12 +98,19 @@ namespace PsdTools.UIToolKit
                     rasterResult,
                     inspectorMode,
                     warnings,
+                    diagnostics,
                     visitedGroups);
                 if (node != null)
                     children.Add(node);
             }
 
-            ApplyVirtualGroups(children, parentLayerId, configMap, warnings, visitedGroups);
+            ApplyVirtualGroups(
+                children,
+                parentLayerId,
+                configMap,
+                warnings,
+                diagnostics,
+                visitedGroups);
             return children;
         }
 
@@ -96,6 +121,7 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitRasterExportResult rasterResult,
             bool inspectorMode,
             List<string> warnings,
+            List<PsdUiToolkitLayoutDiagnostic> diagnostics,
             HashSet<PsdUiToolkitVirtualGroupConfig> visitedGroups)
         {
             if (layer?.LayerId == null)
@@ -116,6 +142,7 @@ namespace PsdTools.UIToolKit
                     rasterResult,
                     inspectorMode,
                     warnings,
+                    diagnostics,
                     visitedGroups);
 
             PsdUiToolkitContainerLayout layoutIntent = configMap.GetChildrenLayout(layer);
@@ -123,7 +150,14 @@ namespace PsdTools.UIToolKit
             if (layoutType == PsdUiToolkitLayoutType.Row || layoutType == PsdUiToolkitLayoutType.Column)
             {
                 OrderChildrenForFlow(children, layoutType);
-                AddOverlapWarning(children, layoutType, layer.Name, warnings);
+                AddOverlapWarning(
+                    children,
+                    layoutType,
+                    layer.Name,
+                    warnings,
+                    diagnostics,
+                    layer.LayerId ?? -1,
+                    null);
             }
 
             string summary = layoutIntent == PsdUiToolkitContainerLayout.Unspecified
@@ -139,7 +173,9 @@ namespace PsdTools.UIToolKit
                 summary,
                 originalIndex,
                 children,
-                itemRole: configMap.GetItemRole(layer));
+                itemRole: configMap.GetItemRole(layer),
+                mainAxisDistribution: configMap.GetMainAxisDistribution(layer),
+                crossAxisAlignment: configMap.GetCrossAxisAlignment(layer));
         }
 
         private static bool ShouldRenderAsLeaf(
@@ -185,6 +221,7 @@ namespace PsdTools.UIToolKit
             int parentLayerId,
             PsdUiToolkitLayerConfigMap configMap,
             List<string> warnings,
+            List<PsdUiToolkitLayoutDiagnostic> diagnostics,
             HashSet<PsdUiToolkitVirtualGroupConfig> visitedGroups)
         {
             PsdUiToolkitVirtualGroupConfig[] groups = configMap.GetVirtualGroups();
@@ -199,7 +236,12 @@ namespace PsdTools.UIToolKit
                 group.Sanitize();
                 if (group.memberLayerIds.Length < 2)
                 {
-                    warnings.Add($"Layout group '{GetGroupName(group)}' needs at least two members and was ignored.");
+                    AddWarning(
+                        warnings,
+                        diagnostics,
+                        "TooFewVirtualGroupMembers",
+                        $"Layout group '{GetGroupName(group)}' needs at least two members and was ignored.",
+                        virtualGroupId: group.id);
                     continue;
                 }
 
@@ -220,7 +262,12 @@ namespace PsdTools.UIToolKit
 
                 if (invalid)
                 {
-                    warnings.Add($"Layout group '{GetGroupName(group)}' contains missing, moved, or reused members and was ignored.");
+                    AddWarning(
+                        warnings,
+                        diagnostics,
+                        "InvalidVirtualGroupMembers",
+                        $"Layout group '{GetGroupName(group)}' contains missing, moved, or reused members and was ignored.",
+                        virtualGroupId: group.id);
                     continue;
                 }
 
@@ -228,7 +275,14 @@ namespace PsdTools.UIToolKit
                     ? PsdUiToolkitLayoutType.Column
                     : PsdUiToolkitLayoutType.Row;
                 OrderChildrenForFlow(members, layoutType);
-                AddOverlapWarning(members, layoutType, GetGroupName(group), warnings);
+                AddOverlapWarning(
+                    members,
+                    layoutType,
+                    GetGroupName(group),
+                    warnings,
+                    diagnostics,
+                    -1,
+                    group.id);
 
                 int insertionIndex = siblings.Count;
                 int lastMemberIndex = -1;
@@ -241,7 +295,14 @@ namespace PsdTools.UIToolKit
                     originalIndex = Math.Min(originalIndex, members[i].OriginalIndex);
                 }
                 if (lastMemberIndex - insertionIndex + 1 != members.Count)
-                    warnings.Add($"Layout group '{GetGroupName(group)}' contains non-contiguous PSD siblings; their relative draw order may change.");
+                {
+                    AddWarning(
+                        warnings,
+                        diagnostics,
+                        "NonContiguousVirtualGroupMembers",
+                        $"Layout group '{GetGroupName(group)}' contains non-contiguous PSD siblings; their relative draw order may change.",
+                        virtualGroupId: group.id);
+                }
 
                 for (int i = 0; i < members.Count; i++)
                 {
@@ -263,7 +324,9 @@ namespace PsdTools.UIToolKit
                     true,
                     "User-created virtual layout group.",
                     PsdUiToolkitItemRole.FollowParent,
-                    group.id);
+                    group.id,
+                    group.mainAxisDistribution,
+                    group.crossAxisAlignment);
 
                 siblings.Insert(Math.Max(0, Math.Min(insertionIndex, siblings.Count)), virtualNode);
             }
@@ -358,7 +421,10 @@ namespace PsdTools.UIToolKit
             List<PsdUiToolkitLayoutNode> children,
             PsdUiToolkitLayoutType layoutType,
             string containerName,
-            List<string> warnings)
+            List<string> warnings,
+            List<PsdUiToolkitLayoutDiagnostic> diagnostics,
+            int layerId,
+            string virtualGroupId)
         {
             PsdUiToolkitLayoutNode previous = null;
             for (int i = 0; i < children.Count; i++)
@@ -374,13 +440,35 @@ namespace PsdTools.UIToolKit
                         : child.Bounds.Top - (previous.Bounds.Top + previous.Bounds.Height);
                     if (gap < 0)
                     {
-                        warnings.Add($"Layout '{containerName}' contains overlapping flow items; the generated gap was clamped to 0.");
+                        AddWarning(
+                            warnings,
+                            diagnostics,
+                            "OverlappingFlowItems",
+                            $"Layout '{containerName}' contains overlapping flow items; the generated gap was clamped to 0.",
+                            layerId,
+                            virtualGroupId);
                         return;
                     }
                 }
 
                 previous = child;
             }
+        }
+
+        private static void AddWarning(
+            List<string> warnings,
+            List<PsdUiToolkitLayoutDiagnostic> diagnostics,
+            string code,
+            string message,
+            int layerId = -1,
+            string virtualGroupId = null)
+        {
+            warnings.Add(message);
+            diagnostics.Add(new PsdUiToolkitLayoutDiagnostic(
+                code,
+                message,
+                layerId,
+                virtualGroupId));
         }
 
         private static int CompareByOriginalIndex(PsdUiToolkitLayoutNode left, PsdUiToolkitLayoutNode right)

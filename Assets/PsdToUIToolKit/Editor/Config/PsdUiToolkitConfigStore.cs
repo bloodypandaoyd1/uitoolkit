@@ -143,6 +143,29 @@ namespace PsdTools.UIToolKit
                 data.configVersion = 2;
             }
 
+            if (data.configVersion < 3)
+            {
+                foreach (PsdUiToolkitLayerConfig entry in data.layers)
+                {
+                    if (entry == null)
+                        continue;
+
+                    entry.mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
+                    entry.crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd;
+                }
+
+                foreach (PsdUiToolkitVirtualGroupConfig group in data.virtualGroups)
+                {
+                    if (group == null)
+                        continue;
+
+                    group.mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
+                    group.crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd;
+                }
+
+                data.configVersion = 3;
+            }
+
             data.configVersion = PsdUiToolkitExportConfigData.CurrentConfigVersion;
             foreach (PsdUiToolkitLayerConfig entry in data.layers)
                 entry?.Sanitize();

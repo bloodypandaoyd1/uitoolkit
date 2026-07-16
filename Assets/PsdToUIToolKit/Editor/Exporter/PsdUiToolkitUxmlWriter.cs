@@ -11,53 +11,6 @@ namespace PsdTools.UIToolKit
 {
     internal static class PsdUiToolkitUxmlWriter
     {
-        private readonly struct FlowChildPlacement
-        {
-            public FlowChildPlacement(bool useFlow, int marginLeft, int marginTop)
-            {
-                UseFlow = useFlow;
-                MarginLeft = Math.Max(0, marginLeft);
-                MarginTop = Math.Max(0, marginTop);
-            }
-
-            public bool UseFlow { get; }
-            public int MarginLeft { get; }
-            public int MarginTop { get; }
-
-            public static FlowChildPlacement Absolute => new FlowChildPlacement(false, 0, 0);
-        }
-
-        private sealed class GridRowPlan
-        {
-            public List<PsdUiToolkitLayoutNode> Children { get; } = new List<PsdUiToolkitLayoutNode>();
-            public Dictionary<PsdUiToolkitLayoutNode, FlowChildPlacement> Placements { get; } = new Dictionary<PsdUiToolkitLayoutNode, FlowChildPlacement>();
-            public int GapBefore { get; set; }
-            public int Height { get; set; }
-        }
-
-        private sealed class FlowContainerPlan
-        {
-            public PsdUiToolkitLayoutType LayoutType { get; set; }
-            public bool UseFlow { get; set; }
-            public int PaddingLeft { get; set; }
-            public int PaddingTop { get; set; }
-            public int PaddingRight { get; set; }
-            public int PaddingBottom { get; set; }
-            public int InnerWidth { get; set; }
-            public List<PsdUiToolkitLayoutNode> FlowChildren { get; } = new List<PsdUiToolkitLayoutNode>();
-            public Dictionary<PsdUiToolkitLayoutNode, FlowChildPlacement> Placements { get; } = new Dictionary<PsdUiToolkitLayoutNode, FlowChildPlacement>();
-            public List<GridRowPlan> GridRows { get; } = new List<GridRowPlan>();
-
-            public static FlowContainerPlan Disabled(PsdUiToolkitLayoutType layoutType)
-            {
-                return new FlowContainerPlan
-                {
-                    LayoutType = layoutType,
-                    UseFlow = false,
-                };
-            }
-        }
-
         public static void Write(
             PsdUiToolkitLayoutTree layoutTree,
             PsdUiToolkitLayerConfigMap configMap,
@@ -81,7 +34,7 @@ namespace PsdTools.UIToolKit
 
             foreach (PsdUiToolkitLayoutNode child in layoutTree.Children)
             {
-                AppendLayoutNode(builder, child, 2, 0, 0, configMap, rasterResult, fontMapping, FlowChildPlacement.Absolute);
+                AppendLayoutNode(builder, child, 2, 0, 0, configMap, rasterResult, fontMapping, PsdUiToolkitFlowChildPlacement.Absolute);
             }
 
             builder.AppendLine("  </ui:VisualElement>");
@@ -101,7 +54,7 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitLayerConfigMap configMap,
             PsdUiToolkitRasterExportResult rasterResult,
             PsdUiToolkitFontMappingLookup fontMapping,
-            FlowChildPlacement placement)
+            PsdUiToolkitFlowChildPlacement placement)
         {
             if (node == null)
                 return;
@@ -125,7 +78,7 @@ namespace PsdTools.UIToolKit
             string elementName = isSynthetic
                 ? (string.IsNullOrEmpty(node.DisplayName) ? $"Auto_{node.OriginalIndex}" : node.DisplayName)
                 : (string.IsNullOrEmpty(layer.Name) ? $"Layer_{layer.LayerId.Value}" : layer.Name);
-            FlowContainerPlan flowPlan = BuildFlowContainerPlan(node, configMap);
+            PsdUiToolkitFlowContainerPlan flowPlan = PsdUiToolkitFlowLayoutResolver.Resolve(node, configMap);
             string style = BuildStyle(node, layer, bounds, left, top, configMap, rasterInfo, fontMapping, placement, flowPlan);
 
             if (!isSynthetic && layer.Kind == LayerKind.Type)
@@ -197,16 +150,16 @@ namespace PsdTools.UIToolKit
                 for (int i = 0; i < node.Children.Count; i++)
                 {
                     PsdUiToolkitLayoutNode child = node.Children[i];
-                    FlowChildPlacement childPlacement = flowPlan.Placements.TryGetValue(child, out FlowChildPlacement resolvedPlacement)
+                    PsdUiToolkitFlowChildPlacement childPlacement = flowPlan.Placements.TryGetValue(child, out PsdUiToolkitFlowChildPlacement resolvedPlacement)
                         ? resolvedPlacement
-                        : FlowChildPlacement.Absolute;
+                        : PsdUiToolkitFlowChildPlacement.Absolute;
                     AppendLayoutNode(builder, child, indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, childPlacement);
                 }
             }
             else
             {
                 for (int i = 0; i < node.Children.Count; i++)
-                    AppendLayoutNode(builder, node.Children[i], indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, FlowChildPlacement.Absolute);
+                    AppendLayoutNode(builder, node.Children[i], indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, PsdUiToolkitFlowChildPlacement.Absolute);
             }
 
             builder.Append(indent);
@@ -222,8 +175,8 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitLayerConfigMap configMap,
             PsdUiToolkitRasterAssetInfo rasterInfo,
             PsdUiToolkitFontMappingLookup fontMapping,
-            FlowChildPlacement placement,
-            FlowContainerPlan flowPlan)
+            PsdUiToolkitFlowChildPlacement placement,
+            PsdUiToolkitFlowContainerPlan flowPlan)
         {
             StringBuilder style = new StringBuilder(256);
             if (placement.UseFlow)
@@ -332,7 +285,9 @@ namespace PsdTools.UIToolKit
                 .Replace("\u2029", "<br>");
         }
 
-        private static void AppendFlowContainerStyle(StringBuilder style, FlowContainerPlan flowPlan)
+        private static void AppendFlowContainerStyle(
+            StringBuilder style,
+            PsdUiToolkitFlowContainerPlan flowPlan)
         {
             if (style == null || flowPlan == null || !flowPlan.UseFlow)
                 return;
@@ -340,10 +295,14 @@ namespace PsdTools.UIToolKit
             switch (flowPlan.LayoutType)
             {
                 case PsdUiToolkitLayoutType.Row:
-                    style.Append(" flex-direction: row; align-items: flex-start;");
+                    style.Append(" flex-direction: row;");
+                    AppendMainAxisDistribution(style, flowPlan.MainAxisDistribution);
+                    AppendCrossAxisAlignment(style, flowPlan.CrossAxisAlignment);
                     break;
                 case PsdUiToolkitLayoutType.Column:
-                    style.Append(" flex-direction: column; align-items: flex-start;");
+                    style.Append(" flex-direction: column;");
+                    AppendMainAxisDistribution(style, flowPlan.MainAxisDistribution);
+                    AppendCrossAxisAlignment(style, flowPlan.CrossAxisAlignment);
                     break;
                 case PsdUiToolkitLayoutType.Grid:
                     style.Append(" flex-direction: column; align-items: stretch;");
@@ -358,219 +317,52 @@ namespace PsdTools.UIToolKit
                 flowPlan.PaddingBottom);
         }
 
-        private static FlowContainerPlan BuildFlowContainerPlan(PsdUiToolkitLayoutNode node, PsdUiToolkitLayerConfigMap configMap)
+        private static void AppendMainAxisDistribution(
+            StringBuilder style,
+            PsdUiToolkitMainAxisDistribution distribution)
         {
-            if (node == null || node.RenderAsLeaf || node.Children.Count == 0)
-                return FlowContainerPlan.Disabled(node?.LayoutType ?? PsdUiToolkitLayoutType.Absolute);
-
-            if (node.LayoutType != PsdUiToolkitLayoutType.Row && node.LayoutType != PsdUiToolkitLayoutType.Column && node.LayoutType != PsdUiToolkitLayoutType.Grid)
-                return FlowContainerPlan.Disabled(node.LayoutType);
-
-            FlowContainerPlan plan = new FlowContainerPlan
+            switch (distribution)
             {
-                LayoutType = node.LayoutType,
-                UseFlow = true,
-            };
-
-            for (int i = 0; i < node.Children.Count; i++)
-            {
-                PsdUiToolkitLayoutNode child = node.Children[i];
-                if (ShouldRenderAsFlowItem(node, child, configMap))
-                    plan.FlowChildren.Add(child);
-            }
-
-            if ((node.LayoutType == PsdUiToolkitLayoutType.Row || node.LayoutType == PsdUiToolkitLayoutType.Column) && plan.FlowChildren.Count == 0)
-                return FlowContainerPlan.Disabled(node.LayoutType);
-            if (node.LayoutType == PsdUiToolkitLayoutType.Grid && plan.FlowChildren.Count == 0)
-                return FlowContainerPlan.Disabled(node.LayoutType);
-
-            ComputeContainerPadding(node, plan);
-            plan.InnerWidth = Math.Max(0, node.Bounds.Width - plan.PaddingLeft - plan.PaddingRight);
-
-            switch (node.LayoutType)
-            {
-                case PsdUiToolkitLayoutType.Row:
-                    BuildRowPlacements(node, plan);
+                case PsdUiToolkitMainAxisDistribution.Center:
+                    style.Append(" justify-content: center;");
                     break;
-                case PsdUiToolkitLayoutType.Column:
-                    BuildColumnPlacements(node, plan);
+                case PsdUiToolkitMainAxisDistribution.End:
+                    style.Append(" justify-content: flex-end;");
                     break;
-                case PsdUiToolkitLayoutType.Grid:
-                    BuildGridPlans(node, plan, configMap);
+                case PsdUiToolkitMainAxisDistribution.SpaceBetween:
+                    style.Append(" justify-content: space-between;");
+                    break;
+                case PsdUiToolkitMainAxisDistribution.SpaceAround:
+                    style.Append(" justify-content: space-around;");
+                    break;
+                case PsdUiToolkitMainAxisDistribution.Start:
+                    style.Append(" justify-content: flex-start;");
                     break;
             }
-
-            if (plan.LayoutType == PsdUiToolkitLayoutType.Grid && plan.GridRows.Count == 0)
-                return FlowContainerPlan.Disabled(node.LayoutType);
-            if ((plan.LayoutType == PsdUiToolkitLayoutType.Row || plan.LayoutType == PsdUiToolkitLayoutType.Column) && plan.Placements.Count == 0)
-                return FlowContainerPlan.Disabled(node.LayoutType);
-
-            return plan;
         }
 
-        private static bool ShouldRenderAsFlowItem(PsdUiToolkitLayoutNode parentNode, PsdUiToolkitLayoutNode childNode, PsdUiToolkitLayerConfigMap configMap)
+        private static void AppendCrossAxisAlignment(
+            StringBuilder style,
+            PsdUiToolkitCrossAxisAlignment alignment)
         {
-            if (parentNode == null || childNode == null)
-                return false;
-
-            if (childNode.IsSynthetic)
-                return childNode.LayoutType != PsdUiToolkitLayoutType.Overlay;
-
-            return childNode.ItemRole == PsdUiToolkitItemRole.FollowParent;
-        }
-
-        private static void ComputeContainerPadding(PsdUiToolkitLayoutNode node, FlowContainerPlan plan)
-        {
-            int minLeft = int.MaxValue;
-            int minTop = int.MaxValue;
-            int maxRight = int.MinValue;
-            int maxBottom = int.MinValue;
-            for (int i = 0; i < plan.FlowChildren.Count; i++)
+            switch (alignment)
             {
-                PsdUiToolkitLayoutNode child = plan.FlowChildren[i];
-                minLeft = Math.Min(minLeft, child.Bounds.Left - node.Bounds.Left);
-                minTop = Math.Min(minTop, child.Bounds.Top - node.Bounds.Top);
-                maxRight = Math.Max(maxRight, GetRight(child.Bounds) - node.Bounds.Left);
-                maxBottom = Math.Max(maxBottom, GetBottom(child.Bounds) - node.Bounds.Top);
+                case PsdUiToolkitCrossAxisAlignment.Center:
+                    style.Append(" align-items: center;");
+                    break;
+                case PsdUiToolkitCrossAxisAlignment.End:
+                    style.Append(" align-items: flex-end;");
+                    break;
+                default:
+                    style.Append(" align-items: flex-start;");
+                    break;
             }
-
-            if (minLeft == int.MaxValue)
-            {
-                plan.PaddingLeft = 0;
-                plan.PaddingTop = 0;
-                plan.PaddingRight = 0;
-                plan.PaddingBottom = 0;
-                return;
-            }
-
-            plan.PaddingLeft = Math.Max(0, minLeft);
-            plan.PaddingTop = Math.Max(0, minTop);
-            plan.PaddingRight = Math.Max(0, node.Bounds.Width - maxRight);
-            plan.PaddingBottom = Math.Max(0, node.Bounds.Height - maxBottom);
-        }
-
-        private static void BuildRowPlacements(PsdUiToolkitLayoutNode node, FlowContainerPlan plan)
-        {
-            int previousRight = 0;
-            bool hasPrevious = false;
-            for (int i = 0; i < plan.FlowChildren.Count; i++)
-            {
-                PsdUiToolkitLayoutNode child = plan.FlowChildren[i];
-                int childLeft = Math.Max(0, child.Bounds.Left - node.Bounds.Left - plan.PaddingLeft);
-                int childTop = Math.Max(0, child.Bounds.Top - node.Bounds.Top - plan.PaddingTop);
-                int marginLeft = hasPrevious
-                    ? Math.Max(0, childLeft - previousRight)
-                    : childLeft;
-                int marginTop = childTop;
-                plan.Placements[child] = new FlowChildPlacement(true, marginLeft, marginTop);
-                previousRight = childLeft + child.Bounds.Width;
-                hasPrevious = true;
-            }
-        }
-
-        private static void BuildColumnPlacements(PsdUiToolkitLayoutNode node, FlowContainerPlan plan)
-        {
-            int previousBottom = 0;
-            bool hasPrevious = false;
-            for (int i = 0; i < plan.FlowChildren.Count; i++)
-            {
-                PsdUiToolkitLayoutNode child = plan.FlowChildren[i];
-                int childLeft = Math.Max(0, child.Bounds.Left - node.Bounds.Left - plan.PaddingLeft);
-                int childTop = Math.Max(0, child.Bounds.Top - node.Bounds.Top - plan.PaddingTop);
-                int marginLeft = childLeft;
-                int marginTop = hasPrevious
-                    ? Math.Max(0, childTop - previousBottom)
-                    : childTop;
-                plan.Placements[child] = new FlowChildPlacement(true, marginLeft, marginTop);
-                previousBottom = childTop + child.Bounds.Height;
-                hasPrevious = true;
-            }
-        }
-
-        private static void BuildGridPlans(PsdUiToolkitLayoutNode node, FlowContainerPlan plan, PsdUiToolkitLayerConfigMap configMap)
-        {
-            List<List<PsdUiToolkitLayoutNode>> rows = BuildGridRows(plan.FlowChildren, configMap);
-            int previousRowBottom = 0;
-            bool hasPreviousRow = false;
-            for (int i = 0; i < rows.Count; i++)
-            {
-                List<PsdUiToolkitLayoutNode> row = rows[i];
-                if (row.Count == 0)
-                    continue;
-
-                GridRowPlan rowPlan = new GridRowPlan();
-                int rowTop = int.MaxValue;
-                int rowBottom = int.MinValue;
-                for (int j = 0; j < row.Count; j++)
-                {
-                    rowTop = Math.Min(rowTop, row[j].Bounds.Top - node.Bounds.Top - plan.PaddingTop);
-                    rowBottom = Math.Max(rowBottom, GetBottom(row[j].Bounds) - node.Bounds.Top - plan.PaddingTop);
-                }
-
-                rowPlan.Height = Math.Max(1, rowBottom - rowTop);
-                rowPlan.GapBefore = hasPreviousRow
-                    ? Math.Max(0, rowTop - previousRowBottom)
-                    : Math.Max(0, rowTop);
-
-                int previousRight = 0;
-                bool hasPrevious = false;
-                for (int j = 0; j < row.Count; j++)
-                {
-                    PsdUiToolkitLayoutNode child = row[j];
-                    rowPlan.Children.Add(child);
-                    int childLeft = Math.Max(0, child.Bounds.Left - node.Bounds.Left - plan.PaddingLeft);
-                    int childTop = Math.Max(0, child.Bounds.Top - node.Bounds.Top - plan.PaddingTop - rowTop);
-                    int marginLeft = hasPrevious
-                        ? Math.Max(0, childLeft - previousRight)
-                        : childLeft;
-                    rowPlan.Placements[child] = new FlowChildPlacement(true, marginLeft, childTop);
-                    previousRight = childLeft + child.Bounds.Width;
-                    hasPrevious = true;
-                }
-
-                previousRowBottom = rowTop + rowPlan.Height;
-                hasPreviousRow = true;
-                plan.GridRows.Add(rowPlan);
-            }
-        }
-
-        private static List<List<PsdUiToolkitLayoutNode>> BuildGridRows(List<PsdUiToolkitLayoutNode> flowChildren, PsdUiToolkitLayerConfigMap configMap)
-        {
-            List<List<PsdUiToolkitLayoutNode>> rows = new List<List<PsdUiToolkitLayoutNode>>();
-            if (flowChildren.Count == 0)
-                return rows;
-
-            PsdUiToolkitAutoLayoutDetectionProfile profile = configMap.GetAutoLayoutProfile();
-            int tolerance = Math.Max(4, Math.Max(profile.AlignmentTolerance, profile.GapTolerance));
-            List<PsdUiToolkitLayoutNode> sorted = new List<PsdUiToolkitLayoutNode>(flowChildren);
-            sorted.Sort(CompareByTopThenLeft);
-            List<float> anchors = new List<float>();
-            for (int i = 0; i < sorted.Count; i++)
-            {
-                PsdUiToolkitLayoutNode child = sorted[i];
-                float top = child.Bounds.Top;
-                if (rows.Count == 0 || Math.Abs(top - anchors[anchors.Count - 1]) > tolerance)
-                {
-                    rows.Add(new List<PsdUiToolkitLayoutNode> { child });
-                    anchors.Add(top);
-                }
-                else
-                {
-                    List<PsdUiToolkitLayoutNode> row = rows[rows.Count - 1];
-                    row.Add(child);
-                    anchors[anchors.Count - 1] = ((anchors[anchors.Count - 1] * (row.Count - 1)) + top) / row.Count;
-                }
-            }
-
-            for (int i = 0; i < rows.Count; i++)
-                rows[i].Sort(CompareByLeftThenTop);
-            return rows;
         }
 
         private static void AppendGridChildren(
             StringBuilder builder,
             PsdUiToolkitLayoutNode node,
-            FlowContainerPlan flowPlan,
+            PsdUiToolkitFlowContainerPlan flowPlan,
             int indentLevel,
             int parentLeft,
             int parentTop,
@@ -595,7 +387,7 @@ namespace PsdTools.UIToolKit
                     continue;
                 }
 
-                AppendLayoutNode(builder, child, indentLevel, node.Bounds.Left, node.Bounds.Top, configMap, rasterResult, fontMapping, FlowChildPlacement.Absolute);
+                AppendLayoutNode(builder, child, indentLevel, node.Bounds.Left, node.Bounds.Top, configMap, rasterResult, fontMapping, PsdUiToolkitFlowChildPlacement.Absolute);
             }
 
             if (!rowsWritten)
@@ -608,8 +400,8 @@ namespace PsdTools.UIToolKit
         private static void AppendSyntheticGridRow(
             StringBuilder builder,
             PsdUiToolkitLayoutNode parentNode,
-            FlowContainerPlan flowPlan,
-            GridRowPlan rowPlan,
+            PsdUiToolkitFlowContainerPlan flowPlan,
+            PsdUiToolkitGridRowPlan rowPlan,
             int rowIndex,
             int indentLevel,
             int parentLeft,
@@ -626,9 +418,9 @@ namespace PsdTools.UIToolKit
             for (int i = 0; i < rowPlan.Children.Count; i++)
             {
                 PsdUiToolkitLayoutNode child = rowPlan.Children[i];
-                FlowChildPlacement placement = rowPlan.Placements.TryGetValue(child, out FlowChildPlacement resolvedPlacement)
+                PsdUiToolkitFlowChildPlacement placement = rowPlan.Placements.TryGetValue(child, out PsdUiToolkitFlowChildPlacement resolvedPlacement)
                     ? resolvedPlacement
-                    : FlowChildPlacement.Absolute;
+                    : PsdUiToolkitFlowChildPlacement.Absolute;
                 AppendLayoutNode(builder, child, indentLevel + 1, parentNode.Bounds.Left, parentNode.Bounds.Top, configMap, rasterResult, fontMapping, placement);
             }
 
@@ -636,7 +428,9 @@ namespace PsdTools.UIToolKit
             builder.AppendLine("</ui:VisualElement>");
         }
 
-        private static string BuildSyntheticGridRowStyle(FlowContainerPlan flowPlan, GridRowPlan rowPlan)
+        private static string BuildSyntheticGridRowStyle(
+            PsdUiToolkitFlowContainerPlan flowPlan,
+            PsdUiToolkitGridRowPlan rowPlan)
         {
             StringBuilder style = new StringBuilder(128);
             style.Append("position: relative; display: flex; flex-direction: row; align-items: flex-start; flex-shrink: 0;");
@@ -653,21 +447,6 @@ namespace PsdTools.UIToolKit
                 parentName = parentNode?.SourceLayer?.LayerId?.ToString() ?? "Grid";
             return $"{parentName}_Row_{rowIndex}";
         }
-
-        private static int CompareByLeftThenTop(PsdUiToolkitLayoutNode left, PsdUiToolkitLayoutNode right)
-        {
-            int compare = left.Bounds.Left.CompareTo(right.Bounds.Left);
-            return compare != 0 ? compare : left.Bounds.Top.CompareTo(right.Bounds.Top);
-        }
-
-        private static int CompareByTopThenLeft(PsdUiToolkitLayoutNode left, PsdUiToolkitLayoutNode right)
-        {
-            int compare = left.Bounds.Top.CompareTo(right.Bounds.Top);
-            return compare != 0 ? compare : left.Bounds.Left.CompareTo(right.Bounds.Left);
-        }
-
-        private static int GetRight(PsdUiToolkitLayerBounds bounds) => bounds.Left + bounds.Width;
-        private static int GetBottom(PsdUiToolkitLayerBounds bounds) => bounds.Top + bounds.Height;
 
         private static string EscapeAttribute(string value)
         {
