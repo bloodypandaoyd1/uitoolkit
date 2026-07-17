@@ -14,6 +14,12 @@ namespace PsdTools.UIToolKit
             public LayerIntent[] layers = Array.Empty<LayerIntent>();
             public PsdUiToolkitVirtualGroupConfig[] virtualGroups =
                 Array.Empty<PsdUiToolkitVirtualGroupConfig>();
+            public PsdUiToolkitButtonSemanticConfig[] buttons =
+                Array.Empty<PsdUiToolkitButtonSemanticConfig>();
+            public PsdUiToolkitComponentDefinitionConfig[] componentDefinitions =
+                Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
+            public PsdUiToolkitComponentInstanceConfig[] componentInstances =
+                Array.Empty<PsdUiToolkitComponentInstanceConfig>();
         }
 
         [Serializable]
@@ -24,6 +30,8 @@ namespace PsdTools.UIToolKit
             public PsdUiToolkitItemRole itemRole;
             public PsdUiToolkitMainAxisDistribution mainAxisDistribution;
             public PsdUiToolkitCrossAxisAlignment crossAxisAlignment;
+            public PsdUiToolkitWrapMode wrapMode;
+            public PsdUiToolkitMultiLineDistribution multiLineDistribution;
         }
 
         private readonly List<string> _states = new List<string>();
@@ -101,13 +109,18 @@ namespace PsdTools.UIToolKit
                     itemRole = layer.itemRole,
                     mainAxisDistribution = layer.mainAxisDistribution,
                     crossAxisAlignment = layer.crossAxisAlignment,
+                    wrapMode = layer.wrapMode,
+                    multiLineDistribution = layer.multiLineDistribution,
                 };
             }
 
             Snapshot snapshot = new Snapshot
             {
                 layers = layerIntents,
-                virtualGroups = CloneVirtualGroups(source.virtualGroups),
+                virtualGroups = source.virtualGroups,
+                buttons = source.buttons,
+                componentDefinitions = source.componentDefinitions,
+                componentInstances = source.componentInstances,
             };
             return JsonUtility.ToJson(snapshot);
         }
@@ -134,39 +147,19 @@ namespace PsdTools.UIToolKit
                 layer.itemRole = intent.itemRole;
                 layer.mainAxisDistribution = intent.mainAxisDistribution;
                 layer.crossAxisAlignment = intent.crossAxisAlignment;
+                layer.wrapMode = intent.wrapMode;
+                layer.multiLineDistribution = intent.multiLineDistribution;
                 layer.Sanitize();
             }
 
-            data.virtualGroups = CloneVirtualGroups(
-                snapshot.virtualGroups ?? Array.Empty<PsdUiToolkitVirtualGroupConfig>());
-        }
-
-        private static PsdUiToolkitVirtualGroupConfig[] CloneVirtualGroups(
-            PsdUiToolkitVirtualGroupConfig[] groups)
-        {
-            groups ??= Array.Empty<PsdUiToolkitVirtualGroupConfig>();
-            PsdUiToolkitVirtualGroupConfig[] clones =
-                new PsdUiToolkitVirtualGroupConfig[groups.Length];
-            for (int i = 0; i < groups.Length; i++)
-            {
-                PsdUiToolkitVirtualGroupConfig group = groups[i];
-                if (group == null)
-                    continue;
-
-                group.Sanitize();
-                clones[i] = new PsdUiToolkitVirtualGroupConfig
-                {
-                    id = group.id,
-                    name = group.name,
-                    parentLayerId = group.parentLayerId,
-                    memberLayerIds = (int[])group.memberLayerIds.Clone(),
-                    layout = group.layout,
-                    mainAxisDistribution = group.mainAxisDistribution,
-                    crossAxisAlignment = group.crossAxisAlignment,
-                };
-            }
-
-            return clones;
+            data.virtualGroups =
+                snapshot.virtualGroups ?? Array.Empty<PsdUiToolkitVirtualGroupConfig>();
+            data.buttons = snapshot.buttons ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>();
+            data.componentDefinitions = snapshot.componentDefinitions
+                ?? Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
+            data.componentInstances = snapshot.componentInstances
+                ?? Array.Empty<PsdUiToolkitComponentInstanceConfig>();
+            PsdUiToolkitConfigStore.MigrateToCurrentVersion(data);
         }
     }
 }

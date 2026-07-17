@@ -4,31 +4,16 @@ using PsdTools.Layers;
 
 namespace PsdTools.UIToolKit
 {
-    public enum PsdUiToolkitAutoLayoutMode
+    internal enum PsdUiToolkitLayoutType
     {
-        Conservative = 1,
-        Balanced = 2,
-        Aggressive = 3,
-        Custom = 4,
-    }
-
-    public enum PsdUiToolkitLayoutFallbackMode
-    {
-        Absolute = 0,
-    }
-
-    public enum PsdUiToolkitLayoutType
-    {
-        Auto = 0,
         Absolute = 1,
         Row = 2,
         Column = 3,
-        Grid = 4,
-        Overlay = 5,
     }
 
     public enum PsdUiToolkitContainerLayout
     {
+        // Kept only so v1-v3 JSON can be migrated. The v4 editor never writes it.
         Unspecified = 0,
         Absolute = 1,
         Row = 2,
@@ -60,6 +45,253 @@ namespace PsdTools.UIToolKit
         End = 3,
     }
 
+    public enum PsdUiToolkitWrapMode
+    {
+        NoWrap = 0,
+        Wrap = 1,
+    }
+
+    public enum PsdUiToolkitMultiLineDistribution
+    {
+        PreservePsd = 0,
+        Start = 1,
+        Center = 2,
+        End = 3,
+    }
+
+    public enum PsdUiToolkitNodeReferenceKind
+    {
+        Layer = 0,
+        VirtualGroup = 1,
+    }
+
+    [Serializable]
+    public struct PsdUiToolkitNodeReference : IEquatable<PsdUiToolkitNodeReference>
+    {
+        public PsdUiToolkitNodeReferenceKind kind;
+        public int layerId;
+        public string virtualGroupId;
+
+        public static PsdUiToolkitNodeReference Layer(int id)
+        {
+            return new PsdUiToolkitNodeReference
+            {
+                kind = PsdUiToolkitNodeReferenceKind.Layer,
+                layerId = id,
+                virtualGroupId = string.Empty,
+            };
+        }
+
+        public static PsdUiToolkitNodeReference VirtualGroup(string id)
+        {
+            return new PsdUiToolkitNodeReference
+            {
+                kind = PsdUiToolkitNodeReferenceKind.VirtualGroup,
+                layerId = -1,
+                virtualGroupId = id ?? string.Empty,
+            };
+        }
+
+        public bool IsValid =>
+            kind == PsdUiToolkitNodeReferenceKind.Layer
+                ? layerId >= 0
+                : !string.IsNullOrEmpty(virtualGroupId);
+
+        public string StableKey =>
+            kind == PsdUiToolkitNodeReferenceKind.Layer
+                ? $"layer:{layerId}"
+                : $"group:{virtualGroupId ?? string.Empty}";
+
+        public void Sanitize()
+        {
+            if (!Enum.IsDefined(typeof(PsdUiToolkitNodeReferenceKind), kind))
+                kind = PsdUiToolkitNodeReferenceKind.Layer;
+            virtualGroupId ??= string.Empty;
+            if (kind == PsdUiToolkitNodeReferenceKind.Layer)
+                virtualGroupId = string.Empty;
+            else
+                layerId = -1;
+        }
+
+        public bool Equals(PsdUiToolkitNodeReference other)
+        {
+            return kind == other.kind
+                && layerId == other.layerId
+                && string.Equals(virtualGroupId ?? string.Empty, other.virtualGroupId ?? string.Empty, StringComparison.Ordinal);
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is PsdUiToolkitNodeReference other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = (int)kind;
+                hash = (hash * 397) ^ layerId;
+                hash = (hash * 397) ^ (virtualGroupId ?? string.Empty).GetHashCode();
+                return hash;
+            }
+        }
+    }
+
+    public enum PsdUiToolkitButtonVisualState
+    {
+        Normal = 0,
+        Hover = 1,
+        Pressed = 2,
+        Disabled = 3,
+        Focused = 4,
+    }
+
+    [Serializable]
+    public sealed class PsdUiToolkitButtonStateBinding
+    {
+        public PsdUiToolkitButtonVisualState state;
+        public PsdUiToolkitNodeReference source;
+
+        public void Sanitize()
+        {
+            if (!Enum.IsDefined(typeof(PsdUiToolkitButtonVisualState), state))
+                state = PsdUiToolkitButtonVisualState.Normal;
+            source.Sanitize();
+        }
+    }
+
+    [Serializable]
+    public sealed class PsdUiToolkitButtonSemanticConfig
+    {
+        public PsdUiToolkitNodeReference owner;
+        public PsdUiToolkitButtonStateBinding[] states = Array.Empty<PsdUiToolkitButtonStateBinding>();
+
+        public void Sanitize()
+        {
+            owner.Sanitize();
+            states ??= Array.Empty<PsdUiToolkitButtonStateBinding>();
+            HashSet<PsdUiToolkitButtonVisualState> seenStates = new HashSet<PsdUiToolkitButtonVisualState>();
+            HashSet<PsdUiToolkitNodeReference> seenSources = new HashSet<PsdUiToolkitNodeReference>();
+            List<PsdUiToolkitButtonStateBinding> valid = new List<PsdUiToolkitButtonStateBinding>();
+            for (int i = 0; i < states.Length; i++)
+            {
+                PsdUiToolkitButtonStateBinding binding = states[i];
+                if (binding == null)
+                    continue;
+                binding.Sanitize();
+                if (!binding.source.IsValid
+                    || !seenStates.Add(binding.state)
+                    || !seenSources.Add(binding.source))
+                {
+                    continue;
+                }
+
+                valid.Add(binding);
+            }
+
+            states = valid.ToArray();
+        }
+
+        public bool TryGetState(PsdUiToolkitButtonVisualState state, out PsdUiToolkitNodeReference source)
+        {
+            for (int i = 0; i < states.Length; i++)
+            {
+                if (states[i] != null && states[i].state == state)
+                {
+                    source = states[i].source;
+                    return true;
+                }
+            }
+
+            source = default;
+            return false;
+        }
+    }
+
+    public enum PsdUiToolkitComponentAttributeKind
+    {
+        Text = 0,
+        Image = 1,
+    }
+
+    [Serializable]
+    public sealed class PsdUiToolkitComponentExposedElementConfig
+    {
+        public string elementName = "";
+        public PsdUiToolkitComponentAttributeKind kind;
+
+        public void Sanitize()
+        {
+            elementName ??= string.Empty;
+            if (!Enum.IsDefined(typeof(PsdUiToolkitComponentAttributeKind), kind))
+                kind = PsdUiToolkitComponentAttributeKind.Text;
+        }
+    }
+
+    [Serializable]
+    public sealed class PsdUiToolkitComponentDefinitionConfig
+    {
+        public string id = "";
+        public string name = "";
+        public PsdUiToolkitNodeReference root;
+        public bool hasContentContainer;
+        public PsdUiToolkitNodeReference contentContainer;
+        public PsdUiToolkitComponentExposedElementConfig[] exposedElements =
+            Array.Empty<PsdUiToolkitComponentExposedElementConfig>();
+
+        public void Sanitize()
+        {
+            id ??= string.Empty;
+            name ??= string.Empty;
+            root.Sanitize();
+            contentContainer.Sanitize();
+            exposedElements ??= Array.Empty<PsdUiToolkitComponentExposedElementConfig>();
+            for (int i = 0; i < exposedElements.Length; i++)
+                exposedElements[i]?.Sanitize();
+        }
+    }
+
+    [Serializable]
+    public sealed class PsdUiToolkitComponentAttributeOverrideConfig
+    {
+        public string elementName = "";
+        public PsdUiToolkitComponentAttributeKind kind;
+        public PsdUiToolkitNodeReference source;
+
+        public void Sanitize()
+        {
+            elementName ??= string.Empty;
+            if (!Enum.IsDefined(typeof(PsdUiToolkitComponentAttributeKind), kind))
+                kind = PsdUiToolkitComponentAttributeKind.Text;
+            source.Sanitize();
+        }
+    }
+
+    [Serializable]
+    public sealed class PsdUiToolkitComponentInstanceConfig
+    {
+        public PsdUiToolkitNodeReference owner;
+        public string componentId = "";
+        public string externalTemplateAssetGuid = "";
+        public PsdUiToolkitComponentAttributeOverrideConfig[] overrides =
+            Array.Empty<PsdUiToolkitComponentAttributeOverrideConfig>();
+        public PsdUiToolkitNodeReference[] contentMembers = Array.Empty<PsdUiToolkitNodeReference>();
+
+        public void Sanitize()
+        {
+            owner.Sanitize();
+            componentId ??= string.Empty;
+            externalTemplateAssetGuid ??= string.Empty;
+            if (!string.IsNullOrEmpty(componentId))
+                externalTemplateAssetGuid = string.Empty;
+            overrides ??= Array.Empty<PsdUiToolkitComponentAttributeOverrideConfig>();
+            contentMembers ??= Array.Empty<PsdUiToolkitNodeReference>();
+            for (int i = 0; i < overrides.Length; i++)
+                overrides[i]?.Sanitize();
+            contentMembers = PsdUiToolkitConfigSanitizer.SanitizeReferences(contentMembers);
+        }
+    }
+
     [Serializable]
     public struct PsdUiToolkitNineSliceParams
     {
@@ -80,261 +312,6 @@ namespace PsdTools.UIToolKit
     }
 
     [Serializable]
-    public struct PsdUiToolkitAutoLayoutGlobalConfig
-    {
-        public bool enabled;
-        public bool rebuildLayoutTree;
-        public PsdUiToolkitAutoLayoutMode detectionMode;
-        public float minimumConfidence;
-        public int alignmentTolerance;
-        public int gapTolerance;
-        public bool allowVirtualContainers;
-        public bool detectBackgroundContainers;
-        public int maxNestingDepth;
-        public int customScoringVersion;
-        public float ambiguityGap;
-        public float backgroundFillThreshold;
-        public int minimumFlowCandidates;
-        public int minimumGridCandidates;
-        public int minimumVirtualContainerCandidates;
-        public float flowAlignmentWeight;
-        public float flowGapWeight;
-        public float flowOverlapWeight;
-        public float flowSpanWeight;
-        public float gridOccupancyWeight;
-        public float gridSizeWeight;
-        public float gridAlignmentWeight;
-        public float gridGapWeight;
-        public float gridOverlapWeight;
-        public PsdUiToolkitLayoutFallbackMode fallbackMode;
-
-        public static PsdUiToolkitAutoLayoutGlobalConfig Default => new PsdUiToolkitAutoLayoutGlobalConfig
-        {
-            enabled = false,
-            rebuildLayoutTree = false,
-            detectionMode = PsdUiToolkitAutoLayoutMode.Conservative,
-            minimumConfidence = 0.8f,
-            alignmentTolerance = 8,
-            gapTolerance = 10,
-            allowVirtualContainers = true,
-            detectBackgroundContainers = true,
-            maxNestingDepth = 3,
-            customScoringVersion = 1,
-            ambiguityGap = 0.08f,
-            backgroundFillThreshold = 0.72f,
-            minimumFlowCandidates = 2,
-            minimumGridCandidates = 4,
-            minimumVirtualContainerCandidates = 2,
-            flowAlignmentWeight = 0.42f,
-            flowGapWeight = 0.25f,
-            flowOverlapWeight = 0.2f,
-            flowSpanWeight = 0.13f,
-            gridOccupancyWeight = 0.28f,
-            gridSizeWeight = 0.24f,
-            gridAlignmentWeight = 0.2f,
-            gridGapWeight = 0.16f,
-            gridOverlapWeight = 0.12f,
-            fallbackMode = PsdUiToolkitLayoutFallbackMode.Absolute,
-        };
-
-        public bool ShouldAnalyze => enabled;
-
-        public PsdUiToolkitAutoLayoutGlobalConfig GetValidated()
-        {
-            PsdUiToolkitAutoLayoutGlobalConfig validated = this;
-            validated.minimumConfidence = Math.Max(0f, Math.Min(1f, validated.minimumConfidence));
-            validated.alignmentTolerance = Math.Max(0, validated.alignmentTolerance);
-            validated.gapTolerance = Math.Max(0, validated.gapTolerance);
-            validated.maxNestingDepth = Math.Max(1, validated.maxNestingDepth);
-            if (validated.customScoringVersion < 1)
-            {
-                PsdUiToolkitAutoLayoutGlobalConfig defaults = Default;
-                validated.customScoringVersion = defaults.customScoringVersion;
-                validated.ambiguityGap = defaults.ambiguityGap;
-                validated.backgroundFillThreshold = defaults.backgroundFillThreshold;
-                validated.minimumFlowCandidates = defaults.minimumFlowCandidates;
-                validated.minimumGridCandidates = defaults.minimumGridCandidates;
-                validated.minimumVirtualContainerCandidates = defaults.minimumVirtualContainerCandidates;
-                validated.flowAlignmentWeight = defaults.flowAlignmentWeight;
-                validated.flowGapWeight = defaults.flowGapWeight;
-                validated.flowOverlapWeight = defaults.flowOverlapWeight;
-                validated.flowSpanWeight = defaults.flowSpanWeight;
-                validated.gridOccupancyWeight = defaults.gridOccupancyWeight;
-                validated.gridSizeWeight = defaults.gridSizeWeight;
-                validated.gridAlignmentWeight = defaults.gridAlignmentWeight;
-                validated.gridGapWeight = defaults.gridGapWeight;
-                validated.gridOverlapWeight = defaults.gridOverlapWeight;
-            }
-            validated.ambiguityGap = Clamp01(validated.ambiguityGap);
-            validated.backgroundFillThreshold = Clamp01(validated.backgroundFillThreshold);
-            validated.minimumFlowCandidates = Math.Max(2, validated.minimumFlowCandidates);
-            validated.minimumGridCandidates = Math.Max(4, validated.minimumGridCandidates);
-            validated.minimumVirtualContainerCandidates = Math.Max(2, validated.minimumVirtualContainerCandidates);
-            validated.flowAlignmentWeight = Math.Max(0f, validated.flowAlignmentWeight);
-            validated.flowGapWeight = Math.Max(0f, validated.flowGapWeight);
-            validated.flowOverlapWeight = Math.Max(0f, validated.flowOverlapWeight);
-            validated.flowSpanWeight = Math.Max(0f, validated.flowSpanWeight);
-            validated.gridOccupancyWeight = Math.Max(0f, validated.gridOccupancyWeight);
-            validated.gridSizeWeight = Math.Max(0f, validated.gridSizeWeight);
-            validated.gridAlignmentWeight = Math.Max(0f, validated.gridAlignmentWeight);
-            validated.gridGapWeight = Math.Max(0f, validated.gridGapWeight);
-            validated.gridOverlapWeight = Math.Max(0f, validated.gridOverlapWeight);
-            if (!Enum.IsDefined(typeof(PsdUiToolkitAutoLayoutMode), validated.detectionMode))
-                validated.detectionMode = Default.detectionMode;
-            if (!Enum.IsDefined(typeof(PsdUiToolkitLayoutFallbackMode), validated.fallbackMode))
-                validated.fallbackMode = Default.fallbackMode;
-            return validated;
-        }
-
-        private static float Clamp01(float value)
-        {
-            return Math.Max(0f, Math.Min(1f, value));
-        }
-    }
-
-    internal readonly struct PsdUiToolkitAutoLayoutDetectionProfile
-    {
-        public PsdUiToolkitAutoLayoutMode Mode { get; }
-        public float MinimumConfidence { get; }
-        public int AlignmentTolerance { get; }
-        public int GapTolerance { get; }
-        public int MaxNestingDepth { get; }
-        public float AmbiguityGap { get; }
-        public float BackgroundFillThreshold { get; }
-        public int MinimumFlowCandidates { get; }
-        public int MinimumGridCandidates { get; }
-        public int MinimumVirtualContainerCandidates { get; }
-        public float FlowAlignmentWeight { get; }
-        public float FlowGapWeight { get; }
-        public float FlowOverlapWeight { get; }
-        public float FlowSpanWeight { get; }
-        public float GridOccupancyWeight { get; }
-        public float GridSizeWeight { get; }
-        public float GridAlignmentWeight { get; }
-        public float GridGapWeight { get; }
-        public float GridOverlapWeight { get; }
-        public bool UsedFlowWeightFallback { get; }
-        public bool UsedGridWeightFallback { get; }
-
-        private PsdUiToolkitAutoLayoutDetectionProfile(
-            PsdUiToolkitAutoLayoutMode mode,
-            float minimumConfidence,
-            int alignmentTolerance,
-            int gapTolerance,
-            int maxNestingDepth,
-            float ambiguityGap,
-            float backgroundFillThreshold,
-            int minimumFlowCandidates,
-            int minimumGridCandidates,
-            int minimumVirtualContainerCandidates,
-            float flowAlignmentWeight,
-            float flowGapWeight,
-            float flowOverlapWeight,
-            float flowSpanWeight,
-            float gridOccupancyWeight,
-            float gridSizeWeight,
-            float gridAlignmentWeight,
-            float gridGapWeight,
-            float gridOverlapWeight,
-            bool usedFlowWeightFallback = false,
-            bool usedGridWeightFallback = false)
-        {
-            Mode = mode;
-            MinimumConfidence = minimumConfidence;
-            AlignmentTolerance = alignmentTolerance;
-            GapTolerance = gapTolerance;
-            MaxNestingDepth = maxNestingDepth;
-            AmbiguityGap = ambiguityGap;
-            BackgroundFillThreshold = backgroundFillThreshold;
-            MinimumFlowCandidates = minimumFlowCandidates;
-            MinimumGridCandidates = minimumGridCandidates;
-            MinimumVirtualContainerCandidates = minimumVirtualContainerCandidates;
-            FlowAlignmentWeight = flowAlignmentWeight;
-            FlowGapWeight = flowGapWeight;
-            FlowOverlapWeight = flowOverlapWeight;
-            FlowSpanWeight = flowSpanWeight;
-            GridOccupancyWeight = gridOccupancyWeight;
-            GridSizeWeight = gridSizeWeight;
-            GridAlignmentWeight = gridAlignmentWeight;
-            GridGapWeight = gridGapWeight;
-            GridOverlapWeight = gridOverlapWeight;
-            UsedFlowWeightFallback = usedFlowWeightFallback;
-            UsedGridWeightFallback = usedGridWeightFallback;
-        }
-
-        public static PsdUiToolkitAutoLayoutDetectionProfile Resolve(PsdUiToolkitAutoLayoutGlobalConfig config)
-        {
-            PsdUiToolkitAutoLayoutGlobalConfig validated = config.GetValidated();
-            switch (validated.detectionMode)
-            {
-                case PsdUiToolkitAutoLayoutMode.Balanced:
-                    return CreateBalanced();
-                case PsdUiToolkitAutoLayoutMode.Aggressive:
-                    return new PsdUiToolkitAutoLayoutDetectionProfile(
-                        validated.detectionMode, 0.55f, 16, 20, 5, 0.03f, 0.60f, 2, 4, 2,
-                        0.32f, 0.23f, 0.15f, 0.30f,
-                        0.34f, 0.12f, 0.18f, 0.24f, 0.12f);
-                case PsdUiToolkitAutoLayoutMode.Custom:
-                    return CreateCustom(validated);
-                default:
-                    return new PsdUiToolkitAutoLayoutDetectionProfile(
-                        PsdUiToolkitAutoLayoutMode.Conservative, 0.85f, 4, 6, 2, 0.12f, 0.85f, 3, 6, 3,
-                        0.50f, 0.25f, 0.20f, 0.05f,
-                        0.28f, 0.24f, 0.28f, 0.14f, 0.06f);
-            }
-        }
-
-        public string GetSummary()
-        {
-            return $"{Mode}: confidence >= {MinimumConfidence:0.##}, alignment tolerance {AlignmentTolerance}px, gap tolerance {GapTolerance}px, max nesting {MaxNestingDepth}, ambiguity gap {AmbiguityGap:0.##}.";
-        }
-
-        private static PsdUiToolkitAutoLayoutDetectionProfile CreateBalanced()
-        {
-            return new PsdUiToolkitAutoLayoutDetectionProfile(
-                PsdUiToolkitAutoLayoutMode.Balanced, 0.70f, 8, 10, 3, 0.08f, 0.72f, 2, 4, 2,
-                0.42f, 0.25f, 0.20f, 0.13f,
-                0.28f, 0.24f, 0.20f, 0.16f, 0.12f);
-        }
-
-        private static PsdUiToolkitAutoLayoutDetectionProfile CreateCustom(PsdUiToolkitAutoLayoutGlobalConfig config)
-        {
-            PsdUiToolkitAutoLayoutDetectionProfile balanced = CreateBalanced();
-            float flowTotal = config.flowAlignmentWeight + config.flowGapWeight + config.flowOverlapWeight + config.flowSpanWeight;
-            float gridTotal = config.gridOccupancyWeight + config.gridSizeWeight + config.gridAlignmentWeight + config.gridGapWeight + config.gridOverlapWeight;
-            bool flowFallback = flowTotal <= 0f;
-            bool gridFallback = gridTotal <= 0f;
-            if (flowFallback)
-                flowTotal = 1f;
-            if (gridFallback)
-                gridTotal = 1f;
-
-            return new PsdUiToolkitAutoLayoutDetectionProfile(
-                PsdUiToolkitAutoLayoutMode.Custom,
-                config.minimumConfidence,
-                config.alignmentTolerance,
-                config.gapTolerance,
-                config.maxNestingDepth,
-                config.ambiguityGap,
-                config.backgroundFillThreshold,
-                config.minimumFlowCandidates,
-                config.minimumGridCandidates,
-                config.minimumVirtualContainerCandidates,
-                flowFallback ? balanced.FlowAlignmentWeight : config.flowAlignmentWeight / flowTotal,
-                flowFallback ? balanced.FlowGapWeight : config.flowGapWeight / flowTotal,
-                flowFallback ? balanced.FlowOverlapWeight : config.flowOverlapWeight / flowTotal,
-                flowFallback ? balanced.FlowSpanWeight : config.flowSpanWeight / flowTotal,
-                gridFallback ? balanced.GridOccupancyWeight : config.gridOccupancyWeight / gridTotal,
-                gridFallback ? balanced.GridSizeWeight : config.gridSizeWeight / gridTotal,
-                gridFallback ? balanced.GridAlignmentWeight : config.gridAlignmentWeight / gridTotal,
-                gridFallback ? balanced.GridGapWeight : config.gridGapWeight / gridTotal,
-                gridFallback ? balanced.GridOverlapWeight : config.gridOverlapWeight / gridTotal,
-                flowFallback,
-                gridFallback);
-        }
-    }
-
-    [Serializable]
     public sealed class PsdUiToolkitLayerConfig
     {
         public int id;
@@ -351,11 +328,12 @@ namespace PsdTools.UIToolKit
         public int nineSliceMinCenterCols = 10;
         public int nineSliceMinCenterRows = 10;
         public int nineSliceMinSameZone = 15;
-        public bool participateInAutoLayout = true;
-        public PsdUiToolkitContainerLayout childrenLayout = PsdUiToolkitContainerLayout.Unspecified;
+        public PsdUiToolkitContainerLayout childrenLayout = PsdUiToolkitContainerLayout.Absolute;
         public PsdUiToolkitItemRole itemRole = PsdUiToolkitItemRole.FollowParent;
         public PsdUiToolkitMainAxisDistribution mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
         public PsdUiToolkitCrossAxisAlignment crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd;
+        public PsdUiToolkitWrapMode wrapMode = PsdUiToolkitWrapMode.NoWrap;
+        public PsdUiToolkitMultiLineDistribution multiLineDistribution = PsdUiToolkitMultiLineDistribution.PreservePsd;
 
         public static PsdUiToolkitLayerConfig CreateDefault(Layer layer)
         {
@@ -376,11 +354,12 @@ namespace PsdTools.UIToolKit
                 nineSliceMinCenterCols = defaults.minCenterCols,
                 nineSliceMinCenterRows = defaults.minCenterRows,
                 nineSliceMinSameZone = defaults.minSameZone,
-                participateInAutoLayout = true,
-                childrenLayout = PsdUiToolkitContainerLayout.Unspecified,
+                childrenLayout = PsdUiToolkitContainerLayout.Absolute,
                 itemRole = PsdUiToolkitItemRole.FollowParent,
                 mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd,
                 crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd,
+                wrapMode = PsdUiToolkitWrapMode.NoWrap,
+                multiLineDistribution = PsdUiToolkitMultiLineDistribution.PreservePsd,
             };
         }
 
@@ -399,14 +378,26 @@ namespace PsdTools.UIToolKit
         public void Sanitize()
         {
             name ??= string.Empty;
-            if (!Enum.IsDefined(typeof(PsdUiToolkitContainerLayout), childrenLayout))
-                childrenLayout = PsdUiToolkitContainerLayout.Unspecified;
+            if (childrenLayout == PsdUiToolkitContainerLayout.Unspecified
+                || !Enum.IsDefined(typeof(PsdUiToolkitContainerLayout), childrenLayout))
+            {
+                childrenLayout = PsdUiToolkitContainerLayout.Absolute;
+            }
             if (!Enum.IsDefined(typeof(PsdUiToolkitItemRole), itemRole))
                 itemRole = PsdUiToolkitItemRole.FollowParent;
             if (!Enum.IsDefined(typeof(PsdUiToolkitMainAxisDistribution), mainAxisDistribution))
                 mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
             if (!Enum.IsDefined(typeof(PsdUiToolkitCrossAxisAlignment), crossAxisAlignment))
                 crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd;
+            if (!Enum.IsDefined(typeof(PsdUiToolkitWrapMode), wrapMode))
+                wrapMode = PsdUiToolkitWrapMode.NoWrap;
+            if (!Enum.IsDefined(typeof(PsdUiToolkitMultiLineDistribution), multiLineDistribution))
+                multiLineDistribution = PsdUiToolkitMultiLineDistribution.PreservePsd;
+            if (childrenLayout != PsdUiToolkitContainerLayout.Row
+                && childrenLayout != PsdUiToolkitContainerLayout.Column)
+            {
+                wrapMode = PsdUiToolkitWrapMode.NoWrap;
+            }
         }
     }
 
@@ -415,9 +406,11 @@ namespace PsdTools.UIToolKit
     {
         public string id = "";
         public string name = "";
-        public int parentLayerId = -1;
-        public int[] memberLayerIds = Array.Empty<int>();
+        public int hostParentLayerId = -1;
+        public PsdUiToolkitNodeReference[] members = Array.Empty<PsdUiToolkitNodeReference>();
         public PsdUiToolkitContainerLayout layout = PsdUiToolkitContainerLayout.Row;
+        public PsdUiToolkitWrapMode wrapMode = PsdUiToolkitWrapMode.NoWrap;
+        public PsdUiToolkitMultiLineDistribution multiLineDistribution = PsdUiToolkitMultiLineDistribution.PreservePsd;
         public PsdUiToolkitMainAxisDistribution mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
         public PsdUiToolkitCrossAxisAlignment crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd;
 
@@ -425,180 +418,110 @@ namespace PsdTools.UIToolKit
         {
             id ??= string.Empty;
             name ??= string.Empty;
-            memberLayerIds ??= Array.Empty<int>();
+            members = PsdUiToolkitConfigSanitizer.SanitizeReferences(members);
             if (layout != PsdUiToolkitContainerLayout.Row && layout != PsdUiToolkitContainerLayout.Column)
                 layout = PsdUiToolkitContainerLayout.Row;
+            if (!Enum.IsDefined(typeof(PsdUiToolkitWrapMode), wrapMode))
+                wrapMode = PsdUiToolkitWrapMode.NoWrap;
+            if (!Enum.IsDefined(typeof(PsdUiToolkitMultiLineDistribution), multiLineDistribution))
+                multiLineDistribution = PsdUiToolkitMultiLineDistribution.PreservePsd;
             if (!Enum.IsDefined(typeof(PsdUiToolkitMainAxisDistribution), mainAxisDistribution))
                 mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
             if (!Enum.IsDefined(typeof(PsdUiToolkitCrossAxisAlignment), crossAxisAlignment))
                 crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd;
-
-            HashSet<int> seen = new HashSet<int>();
-            List<int> uniqueIds = new List<int>(memberLayerIds.Length);
-            for (int i = 0; i < memberLayerIds.Length; i++)
-            {
-                if (seen.Add(memberLayerIds[i]))
-                    uniqueIds.Add(memberLayerIds[i]);
-            }
-
-            memberLayerIds = uniqueIds.ToArray();
         }
     }
 
     [Serializable]
     public sealed class PsdUiToolkitExportConfigData
     {
-        public const int CurrentConfigVersion = 3;
+        public const int CurrentConfigVersion = 4;
 
         public int configVersion;
-        public PsdUiToolkitAutoLayoutGlobalConfig autoLayout = PsdUiToolkitAutoLayoutGlobalConfig.Default;
         public PsdUiToolkitLayerConfig[] layers = Array.Empty<PsdUiToolkitLayerConfig>();
         public PsdUiToolkitVirtualGroupConfig[] virtualGroups = Array.Empty<PsdUiToolkitVirtualGroupConfig>();
+        public PsdUiToolkitButtonSemanticConfig[] buttons = Array.Empty<PsdUiToolkitButtonSemanticConfig>();
+        public PsdUiToolkitComponentDefinitionConfig[] componentDefinitions =
+            Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
+        public PsdUiToolkitComponentInstanceConfig[] componentInstances =
+            Array.Empty<PsdUiToolkitComponentInstanceConfig>();
     }
 
     internal sealed class PsdUiToolkitLayerConfigMap
     {
         private readonly Dictionary<int, PsdUiToolkitLayerConfig> _lookup;
         private readonly PsdUiToolkitVirtualGroupConfig[] _virtualGroups;
-        private readonly PsdUiToolkitAutoLayoutGlobalConfig _autoLayout;
-        private readonly PsdUiToolkitAutoLayoutDetectionProfile _autoLayoutProfile;
+        private readonly PsdUiToolkitButtonSemanticConfig[] _buttons;
+        private readonly PsdUiToolkitComponentDefinitionConfig[] _componentDefinitions;
+        private readonly PsdUiToolkitComponentInstanceConfig[] _componentInstances;
 
         public PsdUiToolkitLayerConfigMap(PsdUiToolkitExportConfigData data)
         {
             _lookup = PsdUiToolkitConfigStore.BuildLookup(data);
             _virtualGroups = data?.virtualGroups ?? Array.Empty<PsdUiToolkitVirtualGroupConfig>();
-            _autoLayout = data == null
-                ? PsdUiToolkitAutoLayoutGlobalConfig.Default
-                : data.autoLayout.GetValidated();
-            _autoLayoutProfile = PsdUiToolkitAutoLayoutDetectionProfile.Resolve(_autoLayout);
+            _buttons = data?.buttons ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>();
+            _componentDefinitions = data?.componentDefinitions ?? Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
+            _componentInstances = data?.componentInstances ?? Array.Empty<PsdUiToolkitComponentInstanceConfig>();
         }
 
         public PsdUiToolkitLayerConfig Get(Layer layer)
         {
-            if (layer?.LayerId == null)
-            {
-                PsdUiToolkitLayerConfig defaultConfig = PsdUiToolkitLayerConfig.CreateDefault(layer);
-                defaultConfig.Sanitize();
-                return defaultConfig;
-            }
-
-            if (_lookup.TryGetValue(layer.LayerId.Value, out PsdUiToolkitLayerConfig config))
+            if (layer?.LayerId != null
+                && _lookup.TryGetValue(layer.LayerId.Value, out PsdUiToolkitLayerConfig config))
             {
                 config.Sanitize();
                 return config;
             }
 
-            PsdUiToolkitLayerConfig fallbackConfig = PsdUiToolkitLayerConfig.CreateDefault(layer);
-            fallbackConfig.Sanitize();
-            return fallbackConfig;
+            PsdUiToolkitLayerConfig fallback = PsdUiToolkitLayerConfig.CreateDefault(layer);
+            fallback.Sanitize();
+            return fallback;
         }
 
-        public PsdUiToolkitAutoLayoutGlobalConfig GetAutoLayoutConfig()
-        {
-            return _autoLayout;
-        }
+        public bool IsExported(Layer layer) => Get(layer).exported;
+        public bool IsVisible(Layer layer) => Get(layer).visible;
+        public bool IsMergeExport(Layer layer) => Get(layer).merge;
+        public bool GetSliceImage(Layer layer) => Get(layer).sliceImage;
+        public bool ParticipateLocalDedup(Layer layer) => Get(layer).participateLocalDedup;
+        public bool ParticipateCommonDedup(Layer layer) => Get(layer).participateCommonDedup;
+        public bool LayerUsesCustomNineSliceParams(Layer layer) => GetSliceImage(layer) && Get(layer).useCustomNineSliceParams;
 
-        public PsdUiToolkitAutoLayoutDetectionProfile GetAutoLayoutProfile()
-        {
-            return _autoLayoutProfile;
-        }
-
-        public bool IsAutoLayoutEnabled()
-        {
-            return _autoLayout.ShouldAnalyze;
-        }
-
-        public bool IsExported(Layer layer)
-        {
-            return Get(layer).exported;
-        }
-
-        public bool IsVisible(Layer layer)
-        {
-            return Get(layer).visible;
-        }
-
-        public bool IsMergeExport(Layer layer)
-        {
-            return Get(layer).merge;
-        }
-
-        public bool GetSliceImage(Layer layer)
-        {
-            return Get(layer).sliceImage;
-        }
-
-        public bool ParticipateLocalDedup(Layer layer)
-        {
-            return Get(layer).participateLocalDedup;
-        }
-
-        public bool ParticipateCommonDedup(Layer layer)
-        {
-            return Get(layer).participateCommonDedup;
-        }
-
-        public bool LayerUsesCustomNineSliceParams(Layer layer)
-        {
-            return GetSliceImage(layer) && Get(layer).useCustomNineSliceParams;
-        }
-
-        public PsdUiToolkitNineSliceParams GetResolvedNineSliceParams(Layer layer, PsdUiToolkitNineSliceParams defaults)
+        public PsdUiToolkitNineSliceParams GetResolvedNineSliceParams(
+            Layer layer,
+            PsdUiToolkitNineSliceParams defaults)
         {
             PsdUiToolkitLayerConfig config = Get(layer);
-            if (config.sliceImage && config.useCustomNineSliceParams)
-                return config.GetNineSliceParams();
-
-            return defaults;
+            return config.sliceImage && config.useCustomNineSliceParams
+                ? config.GetNineSliceParams()
+                : defaults;
         }
 
-        public bool ParticipateInAutoLayout(Layer layer)
-        {
-            PsdUiToolkitLayerConfig config = Get(layer);
-            return config.exported
-                && config.visible
-                && config.participateInAutoLayout;
-        }
-
-        public PsdUiToolkitContainerLayout GetChildrenLayout(Layer layer)
-        {
-            return Get(layer).childrenLayout;
-        }
-
-        public PsdUiToolkitItemRole GetItemRole(Layer layer)
-        {
-            return Get(layer).itemRole;
-        }
-
-        public PsdUiToolkitMainAxisDistribution GetMainAxisDistribution(Layer layer)
-        {
-            return Get(layer).mainAxisDistribution;
-        }
-
-        public PsdUiToolkitCrossAxisAlignment GetCrossAxisAlignment(Layer layer)
-        {
-            return Get(layer).crossAxisAlignment;
-        }
+        public PsdUiToolkitContainerLayout GetChildrenLayout(Layer layer) => Get(layer).childrenLayout;
+        public PsdUiToolkitItemRole GetItemRole(Layer layer) => Get(layer).itemRole;
+        public PsdUiToolkitMainAxisDistribution GetMainAxisDistribution(Layer layer) => Get(layer).mainAxisDistribution;
+        public PsdUiToolkitCrossAxisAlignment GetCrossAxisAlignment(Layer layer) => Get(layer).crossAxisAlignment;
+        public PsdUiToolkitWrapMode GetWrapMode(Layer layer) => Get(layer).wrapMode;
+        public PsdUiToolkitMultiLineDistribution GetMultiLineDistribution(Layer layer) => Get(layer).multiLineDistribution;
 
         public PsdUiToolkitVirtualGroupConfig GetVirtualGroup(string id)
         {
             if (string.IsNullOrEmpty(id))
                 return null;
-
             for (int i = 0; i < _virtualGroups.Length; i++)
             {
-                PsdUiToolkitVirtualGroupConfig group = _virtualGroups[i];
-                if (group != null && string.Equals(group.id, id, StringComparison.Ordinal))
-                    return group;
+                if (_virtualGroups[i] != null
+                    && string.Equals(_virtualGroups[i].id, id, StringComparison.Ordinal))
+                {
+                    return _virtualGroups[i];
+                }
             }
-
             return null;
         }
 
-        public PsdUiToolkitVirtualGroupConfig[] GetVirtualGroups()
-        {
-            return _virtualGroups;
-        }
+        public PsdUiToolkitVirtualGroupConfig[] GetVirtualGroups() => _virtualGroups;
+        public PsdUiToolkitButtonSemanticConfig[] GetButtons() => _buttons;
+        public PsdUiToolkitComponentDefinitionConfig[] GetComponentDefinitions() => _componentDefinitions;
+        public PsdUiToolkitComponentInstanceConfig[] GetComponentInstances() => _componentInstances;
     }
 
     internal static class PsdUiToolkitEditorPrefs
@@ -626,6 +549,25 @@ namespace PsdTools.UIToolKit
         {
             get => UnityEditor.EditorPrefs.GetBool(AutoImageNamingKey, true);
             set => UnityEditor.EditorPrefs.SetBool(AutoImageNamingKey, value);
+        }
+    }
+
+    internal static class PsdUiToolkitConfigSanitizer
+    {
+        public static PsdUiToolkitNodeReference[] SanitizeReferences(
+            PsdUiToolkitNodeReference[] references)
+        {
+            references ??= Array.Empty<PsdUiToolkitNodeReference>();
+            HashSet<PsdUiToolkitNodeReference> seen = new HashSet<PsdUiToolkitNodeReference>();
+            List<PsdUiToolkitNodeReference> valid = new List<PsdUiToolkitNodeReference>();
+            for (int i = 0; i < references.Length; i++)
+            {
+                PsdUiToolkitNodeReference reference = references[i];
+                reference.Sanitize();
+                if (reference.IsValid && seen.Add(reference))
+                    valid.Add(reference);
+            }
+            return valid.ToArray();
         }
     }
 }

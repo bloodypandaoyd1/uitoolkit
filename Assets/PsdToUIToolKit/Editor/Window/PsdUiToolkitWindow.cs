@@ -26,7 +26,6 @@ namespace PsdTools.UIToolKit
         private Layer _selectedLayer;
         private PsdUiToolkitVirtualGroupConfig _selectedVirtualGroup;
         private readonly HashSet<Layer> _selectedLayers = new HashSet<Layer>();
-        private List<PsdUiToolkitLayoutSuggestion> _layoutSuggestions = new List<PsdUiToolkitLayoutSuggestion>();
         private PsdUiToolkitLayoutTree _currentLayoutTree;
         private readonly PsdUiToolkitLayoutEditHistory _layoutHistory =
             new PsdUiToolkitLayoutEditHistory();
@@ -51,6 +50,9 @@ namespace PsdTools.UIToolKit
         private VisualElement _layoutCanvasRoot;
         private readonly Dictionary<int, Texture2D> _layoutPreviewTextures =
             new Dictionary<int, Texture2D>();
+        private readonly Dictionary<PsdUiToolkitNodeReference, Vector2>
+            _layoutPreviewSizeOverrides =
+                new Dictionary<PsdUiToolkitNodeReference, Vector2>();
         private CanvasPreviewMode _canvasPreviewMode = CanvasPreviewMode.Psd;
         private ToolbarButton _psdPreviewButton;
         private ToolbarButton _layoutPreviewButton;
@@ -60,6 +62,11 @@ namespace PsdTools.UIToolKit
         private Toggle _autoImageNamingToggle;
         private ToolbarButton _undoButton;
         private ToolbarButton _redoButton;
+        private PsdUiToolkitButtonVisualState _previewButtonState =
+            PsdUiToolkitButtonVisualState.Normal;
+        private PsdUiToolkitNodeReference _dragCandidateReference;
+        private Vector2 _dragCandidateStart;
+        private bool _dragCandidateArmed;
 
         private Vector2 _lastCanvasClickPsdPosition = new Vector2(-99999f, -99999f);
         private readonly List<Layer> _canvasClickCandidates = new List<Layer>();
@@ -79,7 +86,6 @@ namespace PsdTools.UIToolKit
         };
         private static readonly string[] ContainerLayoutChoices =
         {
-            "Not set",
             "Keep absolute",
             "Row",
             "Column",
@@ -96,6 +102,18 @@ namespace PsdTools.UIToolKit
         private static readonly string[] CrossAxisChoices =
         {
             "Preserve PSD offset",
+            "Start",
+            "Center",
+            "End",
+        };
+        private static readonly string[] WrapChoices =
+        {
+            "No wrap",
+            "Wrap",
+        };
+        private static readonly string[] MultiLineChoices =
+        {
+            "Preserve PSD lines",
             "Start",
             "Center",
             "End",
@@ -333,9 +351,9 @@ namespace PsdTools.UIToolKit
                 if (_selectedLayer != null)
                     _selectedLayers.Add(_selectedLayer);
                 _selectedVirtualGroup = null;
+                _previewButtonState = PsdUiToolkitButtonVisualState.Normal;
                 _canvasShowSelection = _selectedLayer != null;
                 _canvasClickCandidates.Clear();
-                RefreshLayoutSuggestions();
                 RefreshCompositePreview();
                 UpdateStatus($"Loaded {Path.GetFileName(path)} ({_psd.Width}x{_psd.Height})");
                 RefreshView();
@@ -356,8 +374,9 @@ namespace PsdTools.UIToolKit
             _selectedLayer = null;
             _selectedLayers.Clear();
             _selectedVirtualGroup = null;
-            _layoutSuggestions.Clear();
+            _previewButtonState = PsdUiToolkitButtonVisualState.Normal;
             _currentLayoutTree = null;
+            _layoutPreviewSizeOverrides.Clear();
             _layoutHistory.Clear();
             _configMap = null;
             _configData = null;
@@ -395,6 +414,7 @@ namespace PsdTools.UIToolKit
             {
                 string rootName = string.IsNullOrEmpty(_psdPath) ? "PSD" : Path.GetFileNameWithoutExtension(_psdPath);
                 _currentLayoutTree = BuildCurrentAnalysisTree(rootName);
+                AddVirtualGroupDetachDropTarget();
                 for (int i = 0; i < _currentLayoutTree.Children.Count; i++)
                     AddLayoutNodeRow(_currentLayoutTree.Children[i], 0);
                 for (int i = 0; i < _currentLayoutTree.Warnings.Count; i++)
@@ -472,28 +492,27 @@ namespace PsdTools.UIToolKit
                             ? $"Group/{node.LayoutType}"
                             : "Group")
                         : node.SourceLayer.Kind.ToString()));
-            PsdUiToolkitLayoutSuggestion suggestion = node.SourceLayer?.LayerId == null
-                ? null
-                : FindLayerSuggestion(node.SourceLayer.LayerId.Value);
-            string suggestionMarker = suggestion == null
-                ? string.Empty
-                : $" [SUGGEST {suggestion.Layout.ToString().ToUpperInvariant()}]";
             string warningMarker = NodeHasWarning(node, nodeName) ? " [!]" : string.Empty;
             string roleMarker = node.ItemRole == PsdUiToolkitItemRole.Background
                 ? " [BG]"
                 : (node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute ? " [FLOAT]" : string.Empty);
             string layoutMarker = node.LayoutType == PsdUiToolkitLayoutType.Row
-                ? "[ROW] "
+                ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "[ROW/WRAP] " : "[ROW] ")
                 : (node.LayoutType == PsdUiToolkitLayoutType.Column
-                    ? "[COL] "
+                    ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "[COL/WRAP] " : "[COL] ")
                     : "[ABS] ");
             row.text =
-                $"{exportMarker}{visibilityMarker}{new string(' ', depth * 2)}{layoutMarker}{prefix}{nodeName} ({kindLabel}){roleMarker}{suggestionMarker}{warningMarker}";
-            row.tooltip = string.IsNullOrEmpty(node.RebuildReason)
-                ? node.AnalysisSummary
-                : $"{node.RebuildReason}\n{node.AnalysisSummary}";
+                $"{exportMarker}{visibilityMarker}{new string(' ', depth * 2)}{layoutMarker}{prefix}{nodeName} ({kindLabel}){roleMarker}{warningMarker}";
             if (node.SourceLayer == null && string.IsNullOrEmpty(node.VirtualGroupId))
                 row.SetEnabled(false);
+            else
+                RegisterLayoutNodeDragSource(row, node.Reference);
+            if (!string.IsNullOrEmpty(node.VirtualGroupId))
+            {
+                RegisterVirtualGroupDropTarget(
+                    row,
+                    PsdUiToolkitNodeReference.VirtualGroup(node.VirtualGroupId));
+            }
 
             _layerTreeScroll.Add(row);
             if (node.SourceLayer != null && !_layerRows.ContainsKey(node.SourceLayer))
@@ -501,6 +520,249 @@ namespace PsdTools.UIToolKit
 
             for (int i = 0; i < node.Children.Count; i++)
                 AddLayoutNodeRow(node.Children[i], depth + 1);
+        }
+
+        private void RegisterLayoutNodeDragSource(
+            VisualElement element,
+            PsdUiToolkitNodeReference reference)
+        {
+            if (element == null || !reference.IsValid)
+                return;
+            element.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.button != 0)
+                    return;
+                _dragCandidateReference = reference;
+                _dragCandidateStart = evt.position;
+                _dragCandidateArmed = true;
+            }, TrickleDown.TrickleDown);
+            element.RegisterCallback<PointerMoveEvent>(evt =>
+            {
+                if (!_dragCandidateArmed
+                    || !_dragCandidateReference.Equals(reference)
+                    || (evt.pressedButtons & 1) == 0
+                    || ((Vector2)evt.position - _dragCandidateStart).sqrMagnitude < 25f)
+                {
+                    return;
+                }
+
+                _dragCandidateArmed = false;
+                DragAndDrop.PrepareStartDrag();
+                DragAndDrop.SetGenericData(
+                    "PsdUiToolkit.NodeReference",
+                    reference);
+                DragAndDrop.StartDrag(GetReferenceDisplayName(reference));
+                evt.StopPropagation();
+            }, TrickleDown.TrickleDown);
+            element.RegisterCallback<PointerUpEvent>(_ =>
+                _dragCandidateArmed = false,
+                TrickleDown.TrickleDown);
+        }
+
+        private void RegisterVirtualGroupDropTarget(
+            VisualElement element,
+            PsdUiToolkitNodeReference targetReference)
+        {
+            if (element == null
+                || targetReference.kind
+                    != PsdUiToolkitNodeReferenceKind.VirtualGroup)
+            {
+                return;
+            }
+            element.RegisterCallback<DragUpdatedEvent>(evt =>
+            {
+                if (!TryGetDraggedNodeReference(out PsdUiToolkitNodeReference source))
+                    return;
+                PsdUiToolkitVirtualGroupConfig target =
+                    FindVirtualGroup(targetReference.virtualGroupId);
+                DragAndDrop.visualMode = CanMoveReferenceIntoGroup(
+                    source,
+                    target,
+                    out _)
+                        ? DragAndDropVisualMode.Move
+                        : DragAndDropVisualMode.Rejected;
+                evt.StopPropagation();
+            });
+            element.RegisterCallback<DragPerformEvent>(evt =>
+            {
+                if (!TryGetDraggedNodeReference(out PsdUiToolkitNodeReference source))
+                    return;
+                PsdUiToolkitVirtualGroupConfig target =
+                    FindVirtualGroup(targetReference.virtualGroupId);
+                if (!CanMoveReferenceIntoGroup(source, target, out _))
+                    return;
+                DragAndDrop.AcceptDrag();
+                MoveReferenceIntoGroup(source, target);
+                evt.StopPropagation();
+            });
+        }
+
+        private void AddVirtualGroupDetachDropTarget()
+        {
+            Label target = new Label(
+                "PSD hierarchy — drop here to remove from a virtual group");
+            target.style.marginBottom = 5f;
+            target.style.paddingLeft = 6f;
+            target.style.paddingTop = 4f;
+            target.style.paddingBottom = 4f;
+            target.style.backgroundColor = new Color(0.12f, 0.12f, 0.12f, 1f);
+            target.RegisterCallback<DragUpdatedEvent>(evt =>
+            {
+                if (!TryGetDraggedNodeReference(out PsdUiToolkitNodeReference source))
+                    return;
+                DragAndDrop.visualMode = IsOwnedByVirtualGroup(source)
+                    ? DragAndDropVisualMode.Move
+                    : DragAndDropVisualMode.Rejected;
+                evt.StopPropagation();
+            });
+            target.RegisterCallback<DragPerformEvent>(evt =>
+            {
+                if (!TryGetDraggedNodeReference(out PsdUiToolkitNodeReference source)
+                    || !IsOwnedByVirtualGroup(source))
+                {
+                    return;
+                }
+                DragAndDrop.AcceptDrag();
+                DetachReferenceFromVirtualGroups(source);
+                evt.StopPropagation();
+            });
+            _layerTreeScroll.Add(target);
+        }
+
+        private static bool TryGetDraggedNodeReference(
+            out PsdUiToolkitNodeReference reference)
+        {
+            object value = DragAndDrop.GetGenericData(
+                "PsdUiToolkit.NodeReference");
+            if (value is PsdUiToolkitNodeReference dragged
+                && dragged.IsValid)
+            {
+                reference = dragged;
+                return true;
+            }
+            reference = default;
+            return false;
+        }
+
+        private bool CanMoveReferenceIntoGroup(
+            PsdUiToolkitNodeReference source,
+            PsdUiToolkitVirtualGroupConfig target,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (!source.IsValid || target == null)
+            {
+                reason = "The source or destination no longer exists.";
+                return false;
+            }
+            PsdUiToolkitNodeReference targetReference =
+                PsdUiToolkitNodeReference.VirtualGroup(target.id);
+            if (source.Equals(targetReference))
+            {
+                reason = "A group cannot contain itself.";
+                return false;
+            }
+            for (int i = 0; i < target.members.Length; i++)
+            {
+                if (target.members[i].Equals(source))
+                {
+                    reason = "The item is already a direct member of this group.";
+                    return false;
+                }
+            }
+
+            if (source.kind == PsdUiToolkitNodeReferenceKind.Layer)
+            {
+                Layer layer = FindLayerById(source.layerId);
+                if (layer == null
+                    || !TryGetParentLayerId(layer, out int parentId)
+                    || parentId != target.hostParentLayerId)
+                {
+                    reason = "Only direct siblings from the same PSD parent can be regrouped.";
+                    return false;
+                }
+            }
+            else
+            {
+                PsdUiToolkitVirtualGroupConfig sourceGroup =
+                    FindVirtualGroup(source.virtualGroupId);
+                if (sourceGroup == null
+                    || sourceGroup.hostParentLayerId
+                        != target.hostParentLayerId)
+                {
+                    reason = "Nested groups must share the same PSD host parent.";
+                    return false;
+                }
+                if (GroupContains(
+                    sourceGroup.id,
+                    target.id,
+                    new HashSet<string>()))
+                {
+                    reason = "This move would create a virtual-group cycle.";
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private bool IsOwnedByVirtualGroup(PsdUiToolkitNodeReference source)
+        {
+            PsdUiToolkitVirtualGroupConfig[] groups =
+                EnsureConfigData().virtualGroups;
+            for (int groupIndex = 0; groupIndex < groups.Length; groupIndex++)
+            {
+                PsdUiToolkitVirtualGroupConfig group = groups[groupIndex];
+                if (group == null)
+                    continue;
+                for (int memberIndex = 0;
+                    memberIndex < group.members.Length;
+                    memberIndex++)
+                {
+                    if (group.members[memberIndex].Equals(source))
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        private void MoveReferenceIntoGroup(
+            PsdUiToolkitNodeReference source,
+            PsdUiToolkitVirtualGroupConfig target)
+        {
+            ApplyLayoutMutation(() =>
+            {
+                RemoveReferenceFromAllVirtualGroups(source);
+                List<PsdUiToolkitNodeReference> members =
+                    new List<PsdUiToolkitNodeReference>(target.members);
+                members.Add(source);
+                target.members = members.ToArray();
+                _selectedVirtualGroup = target;
+                _selectedLayer = null;
+                _selectedLayers.Clear();
+            });
+        }
+
+        private void DetachReferenceFromVirtualGroups(
+            PsdUiToolkitNodeReference source)
+        {
+            ApplyLayoutMutation(() => RemoveReferenceFromAllVirtualGroups(source));
+        }
+
+        private void RemoveReferenceFromAllVirtualGroups(
+            PsdUiToolkitNodeReference source)
+        {
+            PsdUiToolkitVirtualGroupConfig[] groups =
+                EnsureConfigData().virtualGroups;
+            for (int groupIndex = 0; groupIndex < groups.Length; groupIndex++)
+            {
+                PsdUiToolkitVirtualGroupConfig group = groups[groupIndex];
+                if (group == null)
+                    continue;
+                List<PsdUiToolkitNodeReference> members =
+                    new List<PsdUiToolkitNodeReference>(group.members);
+                members.RemoveAll(item => item.Equals(source));
+                group.members = members.ToArray();
+            }
         }
 
         private bool NodeHasWarning(PsdUiToolkitLayoutNode node, string nodeName)
@@ -633,7 +895,6 @@ namespace PsdTools.UIToolKit
             if (_selectedLayer == null)
             {
                 _inspectorScroll.Add(new HelpBox("Select a layer to edit export settings.", HelpBoxMessageType.Info));
-                AddSuggestionInspectorSection();
                 AddExportSettingsSection();
                 return;
             }
@@ -679,7 +940,6 @@ namespace PsdTools.UIToolKit
             {
                 config.exported = evt.newValue;
                 PersistConfig();
-                RefreshLayoutSuggestions();
                 RebuildLayerTree();
             });
             _inspectorScroll.Add(exportedToggle);
@@ -690,7 +950,6 @@ namespace PsdTools.UIToolKit
                     config.visible = evt.newValue;
                     _selectedLayer.Visible = evt.newValue;
                     PersistConfig();
-                    RefreshLayoutSuggestions();
                     DestroyLayoutPreviewCache();
                     RefreshCompositePreview();
                     RefreshView();
@@ -704,7 +963,6 @@ namespace PsdTools.UIToolKit
                 {
                     config.merge = evt.newValue;
                     PersistConfig();
-                    RefreshLayoutSuggestions();
                     RefreshView();
                 });
                 _inspectorScroll.Add(mergeToggle);
@@ -803,6 +1061,8 @@ namespace PsdTools.UIToolKit
             }
 
             AddManualLayoutInspectorSection(config);
+            if (_selectedLayer.LayerId.HasValue)
+                AddSemanticInspector(PsdUiToolkitNodeReference.Layer(_selectedLayer.LayerId.Value));
             AddExportSettingsSection();
         }
 
@@ -838,9 +1098,8 @@ namespace PsdTools.UIToolKit
             }
 
             _inspectorScroll.Add(new HelpBox(
-                "Layout detection only provides suggestions. Export uses Absolute unless you explicitly choose Row or Column.",
+                "Export uses only the layout intent selected here. Fine spacing remains editable in UI Builder.",
                 HelpBoxMessageType.Info));
-            AddSuggestionInspectorSection();
             AddConfiguredGroupsSection();
         }
 
@@ -867,14 +1126,14 @@ namespace PsdTools.UIToolKit
             DropdownField childrenLayoutField = new DropdownField(
                 "Arrange children",
                 new List<string>(ContainerLayoutChoices),
-                (int)config.childrenLayout);
+                GetLayoutChoiceIndex(config.childrenLayout));
             bool canArrangeChildren =
                 _selectedLayer != null && _selectedLayer.IsGroup && !config.merge;
             childrenLayoutField.SetEnabled(canArrangeChildren);
             childrenLayoutField.RegisterValueChangedCallback(evt =>
             {
                 PsdUiToolkitContainerLayout value =
-                    (PsdUiToolkitContainerLayout)childrenLayoutField.choices.IndexOf(evt.newValue);
+                    GetLayoutFromChoiceIndex(childrenLayoutField.choices.IndexOf(evt.newValue));
                 ApplyLayoutMutation(() => config.childrenLayout = value);
             });
             _inspectorScroll.Add(childrenLayoutField);
@@ -901,18 +1160,724 @@ namespace PsdTools.UIToolKit
                 canConfigureAxes,
                 main => ApplyLayoutMutation(() => config.mainAxisDistribution = main),
                 cross => ApplyLayoutMutation(() => config.crossAxisAlignment = cross));
+            AddWrapLayoutFields(
+                config.wrapMode,
+                config.multiLineDistribution,
+                canConfigureAxes,
+                wrap => ApplyLayoutMutation(() => config.wrapMode = wrap),
+                lines => ApplyLayoutMutation(() => config.multiLineDistribution = lines));
+        }
 
-            PsdUiToolkitLayoutSuggestion suggestion = _selectedLayer?.LayerId == null
-                ? null
-                : FindLayerSuggestion(_selectedLayer.LayerId.Value);
-            if (suggestion != null)
+        private void AddSemanticInspector(PsdUiToolkitNodeReference owner)
+        {
+            PsdUiToolkitLayoutNode ownerNode = FindLayoutNode(owner);
+            if (ownerNode == null)
+                return;
+
+            PsdUiToolkitExportConfigData data = EnsureConfigData();
+            PsdUiToolkitButtonSemanticConfig button = FindButton(owner);
+            PsdUiToolkitComponentDefinitionConfig definition =
+                FindComponentDefinition(owner);
+            PsdUiToolkitComponentInstanceConfig instance =
+                FindComponentInstance(owner);
+
+            _inspectorScroll.Add(new Label("Control Semantics")
             {
-                Button applySuggestion = new Button(() => ApplyLayerSuggestion(suggestion))
+                style =
                 {
-                    text = $"Apply suggested {suggestion.Layout}",
-                    tooltip = suggestion.Summary,
+                    unityFontStyleAndWeight = FontStyle.Bold,
+                    marginTop = 12f,
+                },
+            });
+
+            Toggle buttonToggle = new Toggle("Button")
+            {
+                value = button != null,
+            };
+            buttonToggle.SetEnabled(ownerNode.Children.Count > 0 || button != null);
+            buttonToggle.RegisterValueChangedCallback(evt =>
+            {
+                ApplyLayoutMutation(() =>
+                {
+                    List<PsdUiToolkitButtonSemanticConfig> buttons =
+                        new List<PsdUiToolkitButtonSemanticConfig>(
+                            data.buttons ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>());
+                    buttons.RemoveAll(item => item != null && item.owner.Equals(owner));
+                    if (evt.newValue)
+                    {
+                        buttons.Add(new PsdUiToolkitButtonSemanticConfig
+                        {
+                            owner = owner,
+                            states = Array.Empty<PsdUiToolkitButtonStateBinding>(),
+                        });
+                    }
+                    data.buttons = buttons.ToArray();
+                });
+            });
+            _inspectorScroll.Add(buttonToggle);
+            if (ownerNode.Children.Count == 0 && button == null)
+            {
+                _inspectorScroll.Add(new HelpBox(
+                    "Button semantics require a container with descendant visuals.",
+                    HelpBoxMessageType.Info));
+            }
+
+            if (button != null)
+            {
+                List<PsdUiToolkitLayoutNode> descendants =
+                    CollectLayoutDescendants(ownerNode);
+                for (int stateIndex = 0;
+                    stateIndex < Enum.GetValues(typeof(PsdUiToolkitButtonVisualState)).Length;
+                    stateIndex++)
+                {
+                    AddButtonStateField(
+                        button,
+                        (PsdUiToolkitButtonVisualState)stateIndex,
+                        descendants);
+                }
+
+                DropdownField previewState = new DropdownField(
+                    "Preview state",
+                    new List<string>
+                    {
+                        "Normal",
+                        "Hover",
+                        "Pressed",
+                        "Disabled",
+                        "Focused",
+                    },
+                    (int)_previewButtonState);
+                previewState.RegisterValueChangedCallback(evt =>
+                {
+                    _previewButtonState =
+                        (PsdUiToolkitButtonVisualState)previewState.choices.IndexOf(
+                            evt.newValue);
+                    RebuildLayoutPreview();
+                });
+                _inspectorScroll.Add(previewState);
+                if (!button.TryGetState(
+                    PsdUiToolkitButtonVisualState.Normal,
+                    out _))
+                {
+                    _inspectorScroll.Add(new HelpBox(
+                        "Normal is required. Until it is assigned this node exports as a regular container.",
+                        HelpBoxMessageType.Warning));
+                }
+            }
+
+            List<string> componentRoles = new List<string>
+            {
+                "None",
+                "Component definition",
+                "Component instance",
+            };
+            int roleIndex = definition != null ? 1 : (instance != null ? 2 : 0);
+            DropdownField componentRole = new DropdownField(
+                "Component role",
+                componentRoles,
+                roleIndex);
+            componentRole.RegisterValueChangedCallback(evt =>
+            {
+                int selected = componentRole.choices.IndexOf(evt.newValue);
+                SetComponentRole(owner, ownerNode, selected);
+            });
+            _inspectorScroll.Add(componentRole);
+
+            if (definition != null)
+                AddComponentDefinitionInspector(definition, ownerNode);
+            else if (instance != null)
+                AddComponentInstanceInspector(instance, ownerNode);
+        }
+
+        private void AddButtonStateField(
+            PsdUiToolkitButtonSemanticConfig button,
+            PsdUiToolkitButtonVisualState state,
+            List<PsdUiToolkitLayoutNode> descendants)
+        {
+            List<string> choices = new List<string> { "None" };
+            List<PsdUiToolkitNodeReference> references =
+                new List<PsdUiToolkitNodeReference> { default };
+            int selectedIndex = 0;
+            button.TryGetState(state, out PsdUiToolkitNodeReference selected);
+            for (int i = 0; i < descendants.Count; i++)
+            {
+                PsdUiToolkitLayoutNode node = descendants[i];
+                if (!node.Reference.IsValid)
+                    continue;
+                choices.Add(GetReferenceDisplayName(node.Reference));
+                references.Add(node.Reference);
+                if (node.Reference.Equals(selected))
+                    selectedIndex = choices.Count - 1;
+            }
+
+            DropdownField field = new DropdownField(
+                state.ToString(),
+                choices,
+                selectedIndex);
+            field.RegisterValueChangedCallback(evt =>
+            {
+                int index = field.choices.IndexOf(evt.newValue);
+                PsdUiToolkitNodeReference next = index <= 0
+                    ? default
+                    : references[index];
+                ApplyLayoutMutation(() =>
+                {
+                    List<PsdUiToolkitButtonStateBinding> states =
+                        new List<PsdUiToolkitButtonStateBinding>(
+                            button.states
+                            ?? Array.Empty<PsdUiToolkitButtonStateBinding>());
+                    states.RemoveAll(item =>
+                        item == null
+                        || item.state == state
+                        || (next.IsValid && item.source.Equals(next)));
+                    if (next.IsValid)
+                    {
+                        states.Add(new PsdUiToolkitButtonStateBinding
+                        {
+                            state = state,
+                            source = next,
+                        });
+                    }
+                    button.states = states.ToArray();
+                });
+            });
+            _inspectorScroll.Add(field);
+        }
+
+        private void SetComponentRole(
+            PsdUiToolkitNodeReference owner,
+            PsdUiToolkitLayoutNode ownerNode,
+            int role)
+        {
+            ApplyLayoutMutation(() =>
+            {
+                PsdUiToolkitExportConfigData data = EnsureConfigData();
+                List<PsdUiToolkitComponentDefinitionConfig> definitions =
+                    new List<PsdUiToolkitComponentDefinitionConfig>(
+                        data.componentDefinitions
+                        ?? Array.Empty<PsdUiToolkitComponentDefinitionConfig>());
+                List<PsdUiToolkitComponentInstanceConfig> instances =
+                    new List<PsdUiToolkitComponentInstanceConfig>(
+                        data.componentInstances
+                        ?? Array.Empty<PsdUiToolkitComponentInstanceConfig>());
+                definitions.RemoveAll(item => item != null && item.root.Equals(owner));
+                instances.RemoveAll(item => item != null && item.owner.Equals(owner));
+                if (role == 1)
+                {
+                    definitions.Add(new PsdUiToolkitComponentDefinitionConfig
+                    {
+                        id = Guid.NewGuid().ToString("N"),
+                        name = string.IsNullOrWhiteSpace(ownerNode.DisplayName)
+                            ? "Component"
+                            : ownerNode.DisplayName,
+                        root = owner,
+                        exposedElements = BuildExposedElements(ownerNode),
+                    });
+                }
+                else if (role == 2)
+                {
+                    instances.Add(new PsdUiToolkitComponentInstanceConfig
+                    {
+                        owner = owner,
+                    });
+                }
+                data.componentDefinitions = definitions.ToArray();
+                data.componentInstances = instances.ToArray();
+            });
+        }
+
+        private void AddComponentDefinitionInspector(
+            PsdUiToolkitComponentDefinitionConfig definition,
+            PsdUiToolkitLayoutNode rootNode)
+        {
+            TextField nameField = new TextField("Component name")
+            {
+                value = definition.name,
+                isDelayed = true,
+            };
+            nameField.RegisterValueChangedCallback(evt =>
+                ApplyLayoutMutation(() => definition.name = evt.newValue ?? string.Empty));
+            _inspectorScroll.Add(nameField);
+
+            List<PsdUiToolkitLayoutNode> descendants =
+                CollectLayoutDescendants(rootNode);
+            List<string> contentChoices = new List<string> { "None" };
+            List<PsdUiToolkitNodeReference> contentReferences =
+                new List<PsdUiToolkitNodeReference> { default };
+            int selectedContent = 0;
+            for (int i = 0; i < descendants.Count; i++)
+            {
+                if (descendants[i].Children.Count == 0)
+                    continue;
+                contentChoices.Add(GetReferenceDisplayName(descendants[i].Reference));
+                contentReferences.Add(descendants[i].Reference);
+                if (definition.hasContentContainer
+                    && descendants[i].Reference.Equals(definition.contentContainer))
+                {
+                    selectedContent = contentChoices.Count - 1;
+                }
+            }
+            DropdownField content = new DropdownField(
+                "Content container",
+                contentChoices,
+                selectedContent);
+            content.RegisterValueChangedCallback(evt =>
+            {
+                int index = content.choices.IndexOf(evt.newValue);
+                ApplyLayoutMutation(() =>
+                {
+                    definition.hasContentContainer = index > 0;
+                    definition.contentContainer = index > 0
+                        ? contentReferences[index]
+                        : default;
+                });
+            });
+            _inspectorScroll.Add(content);
+
+            Button refresh = new Button(() =>
+                ApplyLayoutMutation(() =>
+                    definition.exposedElements = BuildExposedElements(rootNode)))
+            {
+                text = "Refresh Label / Image overrides",
+            };
+            _inspectorScroll.Add(refresh);
+
+            _inspectorScroll.Add(new Label("Overridable elements")
+            {
+                style =
+                {
+                    unityFontStyleAndWeight = FontStyle.Bold,
+                    marginTop = 6f,
+                },
+            });
+            PsdUiToolkitComponentExposedElementConfig[] exposed =
+                definition.exposedElements
+                ?? Array.Empty<PsdUiToolkitComponentExposedElementConfig>();
+            if (exposed.Length == 0)
+            {
+                _inspectorScroll.Add(new HelpBox(
+                    "No Label or Image descendants are available for attribute overrides.",
+                    HelpBoxMessageType.Info));
+            }
+            for (int i = 0; i < exposed.Length; i++)
+            {
+                PsdUiToolkitComponentExposedElementConfig item = exposed[i];
+                if (item != null)
+                    _inspectorScroll.Add(new Label($"{item.kind}: {item.elementName}"));
+            }
+        }
+
+        private void AddComponentInstanceInspector(
+            PsdUiToolkitComponentInstanceConfig instance,
+            PsdUiToolkitLayoutNode ownerNode)
+        {
+            PsdUiToolkitComponentDefinitionConfig[] definitions =
+                EnsureConfigData().componentDefinitions
+                ?? Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
+            List<string> templateChoices = new List<string> { "None / external" };
+            List<string> templateIds = new List<string> { string.Empty };
+            int selectedTemplate = 0;
+            for (int i = 0; i < definitions.Length; i++)
+            {
+                PsdUiToolkitComponentDefinitionConfig definition = definitions[i];
+                if (definition == null || string.IsNullOrEmpty(definition.id))
+                    continue;
+                templateChoices.Add(string.IsNullOrWhiteSpace(definition.name)
+                    ? definition.id
+                    : definition.name);
+                templateIds.Add(definition.id);
+                if (definition.id == instance.componentId)
+                    selectedTemplate = templateChoices.Count - 1;
+            }
+            DropdownField template = new DropdownField(
+                "Local template",
+                templateChoices,
+                selectedTemplate);
+            template.RegisterValueChangedCallback(evt =>
+            {
+                int index = template.choices.IndexOf(evt.newValue);
+                ApplyLayoutMutation(() =>
+                {
+                    instance.componentId = templateIds[index];
+                    if (index > 0)
+                        instance.externalTemplateAssetGuid = string.Empty;
+                });
+            });
+            _inspectorScroll.Add(template);
+
+            VisualTreeAsset externalAsset = string.IsNullOrEmpty(
+                instance.externalTemplateAssetGuid)
+                    ? null
+                    : AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
+                        AssetDatabase.GUIDToAssetPath(
+                            instance.externalTemplateAssetGuid));
+            ObjectField external = new ObjectField("External UXML")
+            {
+                objectType = typeof(VisualTreeAsset),
+                allowSceneObjects = false,
+                value = externalAsset,
+            };
+            external.RegisterValueChangedCallback(evt =>
+            {
+                VisualTreeAsset asset = evt.newValue as VisualTreeAsset;
+                string path = asset == null
+                    ? string.Empty
+                    : AssetDatabase.GetAssetPath(asset);
+                ApplyLayoutMutation(() =>
+                {
+                    instance.externalTemplateAssetGuid =
+                        string.IsNullOrEmpty(path)
+                            ? string.Empty
+                            : AssetDatabase.AssetPathToGUID(path);
+                    if (asset != null)
+                        instance.componentId = string.Empty;
+                });
+            });
+            _inspectorScroll.Add(external);
+
+            PsdUiToolkitComponentDefinitionConfig target = null;
+            for (int i = 0; i < definitions.Length; i++)
+            {
+                if (definitions[i] != null
+                    && definitions[i].id == instance.componentId)
+                {
+                    target = definitions[i];
+                    break;
+                }
+            }
+            if (target != null)
+            {
+                PsdUiToolkitComponentDefinitionConfig capturedTarget = target;
+                Button autoMap = new Button(() =>
+                    ApplyLayoutMutation(() =>
+                        instance.overrides = BuildComponentOverrides(
+                            ownerNode,
+                            capturedTarget)))
+                {
+                    text = "Map matching Label / Image names",
                 };
-                _inspectorScroll.Add(applySuggestion);
+                _inspectorScroll.Add(autoMap);
+            }
+
+            PsdUiToolkitComponentAttributeOverrideConfig[] overrides =
+                instance.overrides
+                ?? Array.Empty<PsdUiToolkitComponentAttributeOverrideConfig>();
+            if (overrides.Length > 0)
+            {
+                _inspectorScroll.Add(new Label("Attribute overrides")
+                {
+                    style =
+                    {
+                        unityFontStyleAndWeight = FontStyle.Bold,
+                        marginTop = 6f,
+                    },
+                });
+                for (int i = 0; i < overrides.Length; i++)
+                {
+                    PsdUiToolkitComponentAttributeOverrideConfig item = overrides[i];
+                    if (item != null)
+                    {
+                        _inspectorScroll.Add(new Label(
+                            $"{item.kind}: {item.elementName} ← {GetReferenceDisplayName(item.source)}"));
+                    }
+                }
+            }
+
+            AddComponentContentMembersInspector(instance, ownerNode);
+        }
+
+        private void AddComponentContentMembersInspector(
+            PsdUiToolkitComponentInstanceConfig instance,
+            PsdUiToolkitLayoutNode ownerNode)
+        {
+            _inspectorScroll.Add(new Label("Instance content")
+            {
+                style =
+                {
+                    unityFontStyleAndWeight = FontStyle.Bold,
+                    marginTop = 6f,
+                },
+            });
+            PsdUiToolkitNodeReference[] members =
+                instance.contentMembers ?? Array.Empty<PsdUiToolkitNodeReference>();
+            for (int i = 0; i < members.Length; i++)
+            {
+                PsdUiToolkitNodeReference member = members[i];
+                VisualElement row = new VisualElement
+                {
+                    style = { flexDirection = FlexDirection.Row },
+                };
+                Label label = new Label(GetReferenceDisplayName(member));
+                label.style.flexGrow = 1f;
+                Button remove = new Button(() =>
+                    ApplyLayoutMutation(() =>
+                    {
+                        List<PsdUiToolkitNodeReference> next =
+                            new List<PsdUiToolkitNodeReference>(
+                                instance.contentMembers);
+                        next.RemoveAll(item => item.Equals(member));
+                        instance.contentMembers = next.ToArray();
+                    }))
+                {
+                    text = "Remove",
+                };
+                row.Add(label);
+                row.Add(remove);
+                _inspectorScroll.Add(row);
+            }
+
+            List<PsdUiToolkitLayoutNode> descendants =
+                CollectLayoutDescendants(ownerNode);
+            List<string> choices = new List<string> { "Choose descendant" };
+            List<PsdUiToolkitNodeReference> refs =
+                new List<PsdUiToolkitNodeReference> { default };
+            for (int i = 0; i < descendants.Count; i++)
+            {
+                PsdUiToolkitNodeReference reference = descendants[i].Reference;
+                bool alreadyAdded = false;
+                for (int memberIndex = 0; memberIndex < members.Length; memberIndex++)
+                {
+                    if (members[memberIndex].Equals(reference))
+                    {
+                        alreadyAdded = true;
+                        break;
+                    }
+                }
+                if (!alreadyAdded)
+                {
+                    choices.Add(GetReferenceDisplayName(reference));
+                    refs.Add(reference);
+                }
+            }
+            DropdownField addContent = new DropdownField(
+                "Add content",
+                choices,
+                0);
+            addContent.RegisterValueChangedCallback(evt =>
+            {
+                int index = addContent.choices.IndexOf(evt.newValue);
+                if (index <= 0)
+                    return;
+                ApplyLayoutMutation(() =>
+                {
+                    List<PsdUiToolkitNodeReference> next =
+                        new List<PsdUiToolkitNodeReference>(
+                            instance.contentMembers
+                            ?? Array.Empty<PsdUiToolkitNodeReference>());
+                    next.Add(refs[index]);
+                    instance.contentMembers = next.ToArray();
+                });
+            });
+            addContent.SetEnabled(choices.Count > 1);
+            _inspectorScroll.Add(addContent);
+        }
+
+        private PsdUiToolkitComponentExposedElementConfig[] BuildExposedElements(
+            PsdUiToolkitLayoutNode root)
+        {
+            List<PsdUiToolkitComponentExposedElementConfig> result =
+                new List<PsdUiToolkitComponentExposedElementConfig>();
+            HashSet<string> names = new HashSet<string>(StringComparer.Ordinal);
+            List<PsdUiToolkitLayoutNode> descendants =
+                CollectLayoutDescendants(root);
+            for (int i = 0; i < descendants.Count; i++)
+            {
+                PsdUiToolkitLayoutNode node = descendants[i];
+                PsdUiToolkitComponentAttributeKind? kind = null;
+                if (node.SourceLayer?.Kind == LayerKind.Type)
+                    kind = PsdUiToolkitComponentAttributeKind.Text;
+                else if (node.Children.Count == 0 && node.SourceLayer != null)
+                    kind = PsdUiToolkitComponentAttributeKind.Image;
+                string name = node.DisplayName ?? string.Empty;
+                if (!kind.HasValue
+                    || string.IsNullOrWhiteSpace(name)
+                    || !names.Add(name))
+                {
+                    continue;
+                }
+                result.Add(new PsdUiToolkitComponentExposedElementConfig
+                {
+                    elementName = name,
+                    kind = kind.Value,
+                });
+            }
+            return result.ToArray();
+        }
+
+        private PsdUiToolkitComponentAttributeOverrideConfig[] BuildComponentOverrides(
+            PsdUiToolkitLayoutNode owner,
+            PsdUiToolkitComponentDefinitionConfig definition)
+        {
+            List<PsdUiToolkitComponentAttributeOverrideConfig> result =
+                new List<PsdUiToolkitComponentAttributeOverrideConfig>();
+            List<PsdUiToolkitLayoutNode> descendants =
+                CollectLayoutDescendants(owner);
+            PsdUiToolkitComponentExposedElementConfig[] exposed =
+                definition.exposedElements
+                ?? Array.Empty<PsdUiToolkitComponentExposedElementConfig>();
+            for (int exposedIndex = 0; exposedIndex < exposed.Length; exposedIndex++)
+            {
+                PsdUiToolkitComponentExposedElementConfig target =
+                    exposed[exposedIndex];
+                if (target == null)
+                    continue;
+                for (int nodeIndex = 0; nodeIndex < descendants.Count; nodeIndex++)
+                {
+                    PsdUiToolkitLayoutNode candidate = descendants[nodeIndex];
+                    bool kindMatches =
+                        target.kind == PsdUiToolkitComponentAttributeKind.Text
+                            ? candidate.SourceLayer?.Kind == LayerKind.Type
+                            : candidate.Children.Count == 0
+                                && candidate.SourceLayer != null
+                                && candidate.SourceLayer.Kind != LayerKind.Type;
+                    if (kindMatches
+                        && string.Equals(
+                            candidate.DisplayName,
+                            target.elementName,
+                            StringComparison.Ordinal))
+                    {
+                        result.Add(new PsdUiToolkitComponentAttributeOverrideConfig
+                        {
+                            elementName = target.elementName,
+                            kind = target.kind,
+                            source = candidate.Reference,
+                        });
+                        break;
+                    }
+                }
+            }
+            return result.ToArray();
+        }
+
+        private PsdUiToolkitButtonSemanticConfig FindButton(
+            PsdUiToolkitNodeReference owner)
+        {
+            PsdUiToolkitButtonSemanticConfig[] buttons =
+                EnsureConfigData().buttons
+                ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>();
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                if (buttons[i] != null && buttons[i].owner.Equals(owner))
+                    return buttons[i];
+            }
+            return null;
+        }
+
+        private PsdUiToolkitComponentDefinitionConfig FindComponentDefinition(
+            PsdUiToolkitNodeReference owner)
+        {
+            PsdUiToolkitComponentDefinitionConfig[] definitions =
+                EnsureConfigData().componentDefinitions
+                ?? Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
+            for (int i = 0; i < definitions.Length; i++)
+            {
+                if (definitions[i] != null && definitions[i].root.Equals(owner))
+                    return definitions[i];
+            }
+            return null;
+        }
+
+        private PsdUiToolkitComponentInstanceConfig FindComponentInstance(
+            PsdUiToolkitNodeReference owner)
+        {
+            PsdUiToolkitComponentInstanceConfig[] instances =
+                EnsureConfigData().componentInstances
+                ?? Array.Empty<PsdUiToolkitComponentInstanceConfig>();
+            for (int i = 0; i < instances.Length; i++)
+            {
+                if (instances[i] != null && instances[i].owner.Equals(owner))
+                    return instances[i];
+            }
+            return null;
+        }
+
+        private PsdUiToolkitLayoutNode FindLayoutNode(
+            PsdUiToolkitNodeReference reference)
+        {
+            return _currentLayoutTree == null
+                ? null
+                : FindLayoutNodeRecursive(_currentLayoutTree.Children, reference);
+        }
+
+        private static PsdUiToolkitLayoutNode FindLayoutNodeRecursive(
+            List<PsdUiToolkitLayoutNode> nodes,
+            PsdUiToolkitNodeReference reference)
+        {
+            if (nodes == null)
+                return null;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                PsdUiToolkitLayoutNode node = nodes[i];
+                if (node.Reference.Equals(reference))
+                    return node;
+                PsdUiToolkitLayoutNode nested =
+                    FindLayoutNodeRecursive(node.Children, reference);
+                if (nested != null)
+                    return nested;
+            }
+            return null;
+        }
+
+        private static List<PsdUiToolkitLayoutNode> CollectLayoutDescendants(
+            PsdUiToolkitLayoutNode root)
+        {
+            List<PsdUiToolkitLayoutNode> result =
+                new List<PsdUiToolkitLayoutNode>();
+            CollectLayoutDescendantsRecursive(root, result);
+            return result;
+        }
+
+        private static void CollectLayoutDescendantsRecursive(
+            PsdUiToolkitLayoutNode root,
+            List<PsdUiToolkitLayoutNode> result)
+        {
+            if (root == null)
+                return;
+            for (int i = 0; i < root.Children.Count; i++)
+            {
+                PsdUiToolkitLayoutNode child = root.Children[i];
+                if (child.Reference.IsValid)
+                    result.Add(child);
+                CollectLayoutDescendantsRecursive(child, result);
+            }
+        }
+
+        private string GetReferenceDisplayName(PsdUiToolkitNodeReference reference)
+        {
+            PsdUiToolkitLayoutNode node = FindLayoutNode(reference);
+            if (node != null)
+            {
+                string label = string.IsNullOrWhiteSpace(node.DisplayName)
+                    ? reference.StableKey
+                    : node.DisplayName;
+                return $"{label} ({reference.StableKey})";
+            }
+            return $"Missing {reference.StableKey}";
+        }
+
+        private static int GetLayoutChoiceIndex(PsdUiToolkitContainerLayout layout)
+        {
+            switch (layout)
+            {
+                case PsdUiToolkitContainerLayout.Row:
+                    return 1;
+                case PsdUiToolkitContainerLayout.Column:
+                    return 2;
+                default:
+                    return 0;
+            }
+        }
+
+        private static PsdUiToolkitContainerLayout GetLayoutFromChoiceIndex(int index)
+        {
+            switch (index)
+            {
+                case 1:
+                    return PsdUiToolkitContainerLayout.Row;
+                case 2:
+                    return PsdUiToolkitContainerLayout.Column;
+                default:
+                    return PsdUiToolkitContainerLayout.Absolute;
             }
         }
 
@@ -953,6 +1918,39 @@ namespace PsdTools.UIToolKit
                     "Main-axis distribution and cross-axis alignment are available after choosing Row or Column.",
                     HelpBoxMessageType.Info));
             }
+        }
+
+        private void AddWrapLayoutFields(
+            PsdUiToolkitWrapMode wrapMode,
+            PsdUiToolkitMultiLineDistribution multiLineDistribution,
+            bool enabled,
+            Action<PsdUiToolkitWrapMode> onWrapChanged,
+            Action<PsdUiToolkitMultiLineDistribution> onMultiLineChanged)
+        {
+            DropdownField wrapField = new DropdownField(
+                "Wrap",
+                new List<string>(WrapChoices),
+                (int)wrapMode);
+            wrapField.SetEnabled(enabled);
+            _inspectorScroll.Add(wrapField);
+
+            DropdownField lineField = new DropdownField(
+                "Multiple lines",
+                new List<string>(MultiLineChoices),
+                (int)multiLineDistribution);
+            lineField.SetEnabled(enabled && wrapMode == PsdUiToolkitWrapMode.Wrap);
+            _inspectorScroll.Add(lineField);
+
+            wrapField.RegisterValueChangedCallback(evt =>
+            {
+                int index = Math.Max(0, wrapField.choices.IndexOf(evt.newValue));
+                onWrapChanged?.Invoke((PsdUiToolkitWrapMode)index);
+            });
+            lineField.RegisterValueChangedCallback(evt =>
+            {
+                int index = Math.Max(0, lineField.choices.IndexOf(evt.newValue));
+                onMultiLineChanged?.Invoke((PsdUiToolkitMultiLineDistribution)index);
+            });
         }
 
         private void AddMultiSelectionInspector()
@@ -1005,7 +2003,7 @@ namespace PsdTools.UIToolKit
 
             if (!TryGetParentLayerId(layers[0], out int parentLayerId))
                 return "Could not resolve the selected layer parent.";
-            if (targetGroup != null && targetGroup.parentLayerId != parentLayerId)
+            if (targetGroup != null && targetGroup.hostParentLayerId != parentLayerId)
                 return "Selected layers must share the layout group's direct parent.";
 
             for (int i = 1; i < layers.Count; i++)
@@ -1024,10 +2022,14 @@ namespace PsdTools.UIToolKit
                 if (existing == null || existing.id == targetGroup?.id)
                     continue;
 
-                for (int memberIndex = 0; memberIndex < existing.memberLayerIds.Length; memberIndex++)
+                for (int memberIndex = 0; memberIndex < existing.members.Length; memberIndex++)
                 {
-                    if (ids.Contains(existing.memberLayerIds[memberIndex]))
+                    PsdUiToolkitNodeReference member = existing.members[memberIndex];
+                    if (member.kind == PsdUiToolkitNodeReferenceKind.Layer
+                        && ids.Contains(member.layerId))
+                    {
                         return $"A selected layer already belongs to layout group '{existing.name}'.";
+                    }
                 }
             }
 
@@ -1069,7 +2071,12 @@ namespace PsdTools.UIToolKit
             IEnumerable<Layer> selectedLayers,
             PsdUiToolkitVirtualGroupConfig group)
         {
-            HashSet<int> members = new HashSet<int>(group.memberLayerIds);
+            HashSet<int> members = new HashSet<int>();
+            for (int i = 0; i < group.members.Length; i++)
+            {
+                if (group.members[i].kind == PsdUiToolkitNodeReferenceKind.Layer)
+                    members.Add(group.members[i].layerId);
+            }
             foreach (Layer layer in selectedLayers)
             {
                 if (layer?.LayerId != null && !members.Contains(layer.LayerId.Value))
@@ -1090,30 +2097,24 @@ namespace PsdTools.UIToolKit
                 return;
             }
 
-            Dictionary<int, Layer> members = new Dictionary<int, Layer>();
-            for (int i = 0; i < group.memberLayerIds.Length; i++)
-            {
-                Layer layer = FindLayerById(group.memberLayerIds[i]);
-                if (layer != null)
-                    members[group.memberLayerIds[i]] = layer;
-            }
+            List<PsdUiToolkitNodeReference> members =
+                new List<PsdUiToolkitNodeReference>(group.members);
+            HashSet<PsdUiToolkitNodeReference> seen =
+                new HashSet<PsdUiToolkitNodeReference>(members);
             foreach (Layer layer in selectedLayers)
             {
                 if (layer?.LayerId != null)
-                    members[layer.LayerId.Value] = layer;
+                {
+                    PsdUiToolkitNodeReference reference =
+                        PsdUiToolkitNodeReference.Layer(layer.LayerId.Value);
+                    if (seen.Add(reference))
+                        members.Add(reference);
+                }
             }
-
-            List<Layer> ordered = new List<Layer>(members.Values);
-            ordered.Sort(group.layout == PsdUiToolkitContainerLayout.Column
-                ? (Comparison<Layer>)CompareLayersByTopThenLeft
-                : CompareLayersByLeftThenTop);
-            int[] memberIds = new int[ordered.Count];
-            for (int i = 0; i < ordered.Count; i++)
-                memberIds[i] = ordered[i].LayerId.Value;
 
             ApplyLayoutMutation(() =>
             {
-                group.memberLayerIds = memberIds;
+                group.members = members.ToArray();
                 _selectedVirtualGroup = group;
                 _selectedLayers.Clear();
                 _selectedLayer = null;
@@ -1122,23 +2123,16 @@ namespace PsdTools.UIToolKit
 
         private void RemoveMemberFromVirtualGroup(
             PsdUiToolkitVirtualGroupConfig group,
-            int memberLayerId)
+            PsdUiToolkitNodeReference memberReference)
         {
-            List<int> memberIds = new List<int>();
-            for (int i = 0; i < group.memberLayerIds.Length; i++)
+            List<PsdUiToolkitNodeReference> members =
+                new List<PsdUiToolkitNodeReference>();
+            for (int i = 0; i < group.members.Length; i++)
             {
-                if (group.memberLayerIds[i] != memberLayerId)
-                    memberIds.Add(group.memberLayerIds[i]);
+                if (!group.members[i].Equals(memberReference))
+                    members.Add(group.members[i]);
             }
-
-            if (memberIds.Count < 2)
-            {
-                DissolveVirtualGroup(group);
-                UpdateStatus("The layout group was dissolved because fewer than two members remained.");
-                return;
-            }
-
-            ApplyLayoutMutation(() => group.memberLayerIds = memberIds.ToArray());
+            ApplyLayoutMutation(() => group.members = members.ToArray());
         }
 
         private void AddVirtualGroupInspector(PsdUiToolkitVirtualGroupConfig group)
@@ -1178,24 +2172,42 @@ namespace PsdTools.UIToolKit
                 true,
                 main => ApplyLayoutMutation(() => group.mainAxisDistribution = main),
                 cross => ApplyLayoutMutation(() => group.crossAxisAlignment = cross));
+            AddWrapLayoutFields(
+                group.wrapMode,
+                group.multiLineDistribution,
+                true,
+                wrap => ApplyLayoutMutation(() => group.wrapMode = wrap),
+                lines => ApplyLayoutMutation(() => group.multiLineDistribution = lines));
 
             _inspectorScroll.Add(new Label("Members")
             {
                 style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 8f },
             });
-            for (int i = 0; i < group.memberLayerIds.Length; i++)
+            for (int i = 0; i < group.members.Length; i++)
             {
-                int memberId = group.memberLayerIds[i];
-                Layer member = FindLayerById(memberId);
+                PsdUiToolkitNodeReference memberReference = group.members[i];
+                Layer member = memberReference.kind == PsdUiToolkitNodeReferenceKind.Layer
+                    ? FindLayerById(memberReference.layerId)
+                    : null;
+                PsdUiToolkitVirtualGroupConfig childGroup =
+                    memberReference.kind == PsdUiToolkitNodeReferenceKind.VirtualGroup
+                        ? FindVirtualGroup(memberReference.virtualGroupId)
+                        : null;
                 VisualElement memberRow = new VisualElement
                 {
                     style = { flexDirection = FlexDirection.Row },
                 };
-                Label memberLabel = new Label(member == null
-                    ? $"Missing layer #{memberId}"
-                    : member.Name);
+                Label memberLabel = new Label(memberReference.kind
+                    == PsdUiToolkitNodeReferenceKind.Layer
+                        ? (member == null
+                            ? $"Missing layer #{memberReference.layerId}"
+                            : member.Name)
+                        : (childGroup == null
+                            ? $"Missing group {memberReference.virtualGroupId}"
+                            : $"[Group] {childGroup.name}"));
                 memberLabel.style.flexGrow = 1f;
-                Button removeButton = new Button(() => RemoveMemberFromVirtualGroup(group, memberId))
+                Button removeButton = new Button(
+                    () => RemoveMemberFromVirtualGroup(group, memberReference))
                 {
                     text = "Remove",
                 };
@@ -1204,37 +2216,56 @@ namespace PsdTools.UIToolKit
                 _inspectorScroll.Add(memberRow);
             }
 
+            _inspectorScroll.Add(new Label("Nesting")
+            {
+                style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 8f },
+            });
+            VisualElement parentButtons = new VisualElement
+            {
+                style = { flexDirection = FlexDirection.Row },
+            };
+            Button parentRow = new Button(
+                () => CreateParentVirtualGroup(group, PsdUiToolkitContainerLayout.Row))
+            {
+                text = "Wrap in Row",
+            };
+            Button parentColumn = new Button(
+                () => CreateParentVirtualGroup(group, PsdUiToolkitContainerLayout.Column))
+            {
+                text = "Wrap in Column",
+            };
+            parentRow.style.flexGrow = 1f;
+            parentColumn.style.flexGrow = 1f;
+            parentButtons.Add(parentRow);
+            parentButtons.Add(parentColumn);
+            _inspectorScroll.Add(parentButtons);
+
+            PsdUiToolkitVirtualGroupConfig[] allGroups = EnsureConfigData().virtualGroups;
+            for (int i = 0; i < allGroups.Length; i++)
+            {
+                PsdUiToolkitVirtualGroupConfig target = allGroups[i];
+                if (target == null
+                    || target.id == group.id
+                    || target.hostParentLayerId != group.hostParentLayerId
+                    || GroupContains(group.id, target.id, new HashSet<string>()))
+                {
+                    continue;
+                }
+                Button moveButton = new Button(() => MoveVirtualGroupInto(group, target))
+                {
+                    text = $"Move into {target.name}",
+                };
+                _inspectorScroll.Add(moveButton);
+            }
+
+            AddSemanticInspector(PsdUiToolkitNodeReference.VirtualGroup(group.id));
+
             Button dissolveButton = new Button(() => DissolveVirtualGroup(group))
             {
                 text = "Dissolve Group",
             };
             dissolveButton.style.marginTop = 8f;
             _inspectorScroll.Add(dissolveButton);
-        }
-
-        private void AddSuggestionInspectorSection()
-        {
-            List<PsdUiToolkitLayoutSuggestion> virtualSuggestions = new List<PsdUiToolkitLayoutSuggestion>();
-            for (int i = 0; i < _layoutSuggestions.Count; i++)
-            {
-                if (_layoutSuggestions[i].IsVirtualGroup)
-                    virtualSuggestions.Add(_layoutSuggestions[i]);
-            }
-
-            if (virtualSuggestions.Count == 0)
-                return;
-
-            _inspectorScroll.Add(new Label("Layout Suggestions") { style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 10f } });
-            for (int i = 0; i < virtualSuggestions.Count; i++)
-            {
-                PsdUiToolkitLayoutSuggestion suggestion = virtualSuggestions[i];
-                Button applyButton = new Button(() => ApplyVirtualSuggestion(suggestion))
-                {
-                    text = $"Create suggested {suggestion.Layout} group ({suggestion.MemberLayerIds.Length} items)",
-                    tooltip = suggestion.Summary,
-                };
-                _inspectorScroll.Add(applyButton);
-            }
         }
 
         private void AddConfiguredGroupsSection()
@@ -1251,70 +2282,10 @@ namespace PsdTools.UIToolKit
                     continue;
                 Button selectButton = new Button(() => SelectVirtualGroup(group.id))
                 {
-                    text = $"{group.name} ({group.layout}, {group.memberLayerIds.Length} items)",
+                    text = $"{group.name} ({group.layout}, {group.members.Length} items)",
                 };
                 _inspectorScroll.Add(selectButton);
             }
-        }
-
-        private void RefreshLayoutSuggestions()
-        {
-            _layoutSuggestions.Clear();
-            if (_psd == null || _configData == null)
-                return;
-
-            try
-            {
-                string rootName = string.IsNullOrEmpty(_psdPath) ? "PSD" : Path.GetFileNameWithoutExtension(_psdPath);
-                _layoutSuggestions = PsdUiToolkitLayoutSuggestionService.Analyze(_psd, _configData, rootName);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[PsdUiToolkit] Layout suggestion analysis failed: {ex.Message}");
-            }
-        }
-
-        private PsdUiToolkitLayoutSuggestion FindLayerSuggestion(int layerId)
-        {
-            for (int i = 0; i < _layoutSuggestions.Count; i++)
-            {
-                if (_layoutSuggestions[i].TargetLayerId == layerId)
-                    return _layoutSuggestions[i];
-            }
-
-            return null;
-        }
-
-        private void ApplyLayerSuggestion(PsdUiToolkitLayoutSuggestion suggestion)
-        {
-            Layer layer = FindLayerById(suggestion?.TargetLayerId ?? -1);
-            if (layer == null)
-                return;
-
-            PsdUiToolkitLayerConfig config = GetOrCreateLayerConfig(layer);
-            ApplyLayoutMutation(() =>
-            {
-                config.childrenLayout = suggestion.Layout;
-                config.mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
-                config.crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.PreservePsd;
-            });
-        }
-
-        private void ApplyVirtualSuggestion(PsdUiToolkitLayoutSuggestion suggestion)
-        {
-            if (suggestion == null)
-                return;
-
-            List<Layer> layers = new List<Layer>();
-            for (int i = 0; i < suggestion.MemberLayerIds.Length; i++)
-            {
-                Layer layer = FindLayerById(suggestion.MemberLayerIds[i]);
-                if (layer == null)
-                    return;
-                layers.Add(layer);
-            }
-
-            CreateVirtualGroupFromLayers(layers, suggestion.Layout);
         }
 
         private void CreateVirtualGroupFromLayers(
@@ -1355,11 +2326,15 @@ namespace PsdTools.UIToolKit
                 PsdUiToolkitVirtualGroupConfig existingGroup = data.virtualGroups[i];
                 if (existingGroup == null)
                     continue;
-                for (int j = 0; j < existingGroup.memberLayerIds.Length; j++)
+                for (int j = 0; j < existingGroup.members.Length; j++)
                 {
+                    PsdUiToolkitNodeReference existingMember =
+                        existingGroup.members[j];
+                    if (existingMember.kind != PsdUiToolkitNodeReferenceKind.Layer)
+                        continue;
                     for (int k = 0; k < layers.Count; k++)
                     {
-                        if (existingGroup.memberLayerIds[j] == layers[k].LayerId.Value)
+                        if (existingMember.layerId == layers[k].LayerId.Value)
                         {
                             EditorUtility.DisplayDialog(
                                 "Layout Group",
@@ -1374,16 +2349,20 @@ namespace PsdTools.UIToolKit
             layers.Sort(layout == PsdUiToolkitContainerLayout.Column
                 ? (Comparison<Layer>)CompareLayersByTopThenLeft
                 : CompareLayersByLeftThenTop);
-            int[] memberIds = new int[layers.Count];
+            PsdUiToolkitNodeReference[] memberReferences =
+                new PsdUiToolkitNodeReference[layers.Count];
             for (int i = 0; i < layers.Count; i++)
-                memberIds[i] = layers[i].LayerId.Value;
+            {
+                memberReferences[i] =
+                    PsdUiToolkitNodeReference.Layer(layers[i].LayerId.Value);
+            }
 
             PsdUiToolkitVirtualGroupConfig group = new PsdUiToolkitVirtualGroupConfig
             {
                 id = Guid.NewGuid().ToString("N"),
                 name = $"{layout} Group {data.virtualGroups.Length + 1}",
-                parentLayerId = parentLayerId,
-                memberLayerIds = memberIds,
+                hostParentLayerId = parentLayerId,
+                members = memberReferences,
                 layout = layout == PsdUiToolkitContainerLayout.Column
                     ? PsdUiToolkitContainerLayout.Column
                     : PsdUiToolkitContainerLayout.Row,
@@ -1411,32 +2390,142 @@ namespace PsdTools.UIToolKit
                 group.layout = layout == PsdUiToolkitContainerLayout.Column
                     ? PsdUiToolkitContainerLayout.Column
                     : PsdUiToolkitContainerLayout.Row;
-                SortVirtualGroupMemberIds(group);
             });
         }
 
-        private void SortVirtualGroupMemberIds(PsdUiToolkitVirtualGroupConfig group)
+        private void CreateParentVirtualGroup(
+            PsdUiToolkitVirtualGroupConfig child,
+            PsdUiToolkitContainerLayout layout)
         {
-            List<Layer> members = new List<Layer>();
-            List<int> missingMemberIds = new List<int>();
-            for (int i = 0; i < group.memberLayerIds.Length; i++)
+            PsdUiToolkitExportConfigData data = EnsureConfigData();
+            PsdUiToolkitVirtualGroupConfig parent = new PsdUiToolkitVirtualGroupConfig
             {
-                Layer layer = FindLayerById(group.memberLayerIds[i]);
-                if (layer != null)
-                    members.Add(layer);
-                else
-                    missingMemberIds.Add(group.memberLayerIds[i]);
+                id = Guid.NewGuid().ToString("N"),
+                name = $"{layout} Group {data.virtualGroups.Length + 1}",
+                hostParentLayerId = child.hostParentLayerId,
+                members = new[] { PsdUiToolkitNodeReference.VirtualGroup(child.id) },
+                layout = layout == PsdUiToolkitContainerLayout.Column
+                    ? PsdUiToolkitContainerLayout.Column
+                    : PsdUiToolkitContainerLayout.Row,
+            };
+            ApplyLayoutMutation(() =>
+            {
+                PsdUiToolkitVirtualGroupConfig owner = FindGroupOwner(child.id);
+                if (owner != null)
+                    ReplaceGroupReference(owner, child.id, parent.id);
+                List<PsdUiToolkitVirtualGroupConfig> groups =
+                    new List<PsdUiToolkitVirtualGroupConfig>(data.virtualGroups)
+                    {
+                        parent,
+                    };
+                data.virtualGroups = groups.ToArray();
+                _selectedVirtualGroup = parent;
+            });
+        }
+
+        private void MoveVirtualGroupInto(
+            PsdUiToolkitVirtualGroupConfig source,
+            PsdUiToolkitVirtualGroupConfig target)
+        {
+            if (source == null
+                || target == null
+                || source.hostParentLayerId != target.hostParentLayerId
+                || GroupContains(source.id, target.id, new HashSet<string>()))
+            {
+                return;
             }
 
-            members.Sort(group.layout == PsdUiToolkitContainerLayout.Column
-                ? (Comparison<Layer>)CompareLayersByTopThenLeft
-                : CompareLayersByLeftThenTop);
-            int[] memberIds = new int[members.Count + missingMemberIds.Count];
-            for (int i = 0; i < members.Count; i++)
-                memberIds[i] = members[i].LayerId.Value;
-            for (int i = 0; i < missingMemberIds.Count; i++)
-                memberIds[members.Count + i] = missingMemberIds[i];
-            group.memberLayerIds = memberIds;
+            ApplyLayoutMutation(() =>
+            {
+                PsdUiToolkitVirtualGroupConfig owner = FindGroupOwner(source.id);
+                if (owner != null)
+                    RemoveGroupReference(owner, source.id);
+                List<PsdUiToolkitNodeReference> members =
+                    new List<PsdUiToolkitNodeReference>(target.members);
+                PsdUiToolkitNodeReference reference =
+                    PsdUiToolkitNodeReference.VirtualGroup(source.id);
+                if (!members.Contains(reference))
+                    members.Add(reference);
+                target.members = members.ToArray();
+                _selectedVirtualGroup = target;
+            });
+        }
+
+        private PsdUiToolkitVirtualGroupConfig FindGroupOwner(string childGroupId)
+        {
+            PsdUiToolkitVirtualGroupConfig[] groups = EnsureConfigData().virtualGroups;
+            for (int i = 0; i < groups.Length; i++)
+            {
+                PsdUiToolkitVirtualGroupConfig group = groups[i];
+                if (group == null)
+                    continue;
+                for (int memberIndex = 0; memberIndex < group.members.Length; memberIndex++)
+                {
+                    PsdUiToolkitNodeReference member = group.members[memberIndex];
+                    if (member.kind == PsdUiToolkitNodeReferenceKind.VirtualGroup
+                        && member.virtualGroupId == childGroupId)
+                    {
+                        return group;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static void ReplaceGroupReference(
+            PsdUiToolkitVirtualGroupConfig owner,
+            string oldId,
+            string newId)
+        {
+            for (int i = 0; i < owner.members.Length; i++)
+            {
+                if (owner.members[i].kind == PsdUiToolkitNodeReferenceKind.VirtualGroup
+                    && owner.members[i].virtualGroupId == oldId)
+                {
+                    owner.members[i] = PsdUiToolkitNodeReference.VirtualGroup(newId);
+                }
+            }
+        }
+
+        private static void RemoveGroupReference(
+            PsdUiToolkitVirtualGroupConfig owner,
+            string groupId)
+        {
+            List<PsdUiToolkitNodeReference> members =
+                new List<PsdUiToolkitNodeReference>();
+            for (int i = 0; i < owner.members.Length; i++)
+            {
+                if (owner.members[i].kind != PsdUiToolkitNodeReferenceKind.VirtualGroup
+                    || owner.members[i].virtualGroupId != groupId)
+                {
+                    members.Add(owner.members[i]);
+                }
+            }
+            owner.members = members.ToArray();
+        }
+
+        private bool GroupContains(
+            string rootGroupId,
+            string soughtGroupId,
+            HashSet<string> visited)
+        {
+            if (!visited.Add(rootGroupId))
+                return false;
+            PsdUiToolkitVirtualGroupConfig root = FindVirtualGroup(rootGroupId);
+            if (root == null)
+                return false;
+            for (int i = 0; i < root.members.Length; i++)
+            {
+                PsdUiToolkitNodeReference member = root.members[i];
+                if (member.kind != PsdUiToolkitNodeReferenceKind.VirtualGroup)
+                    continue;
+                if (member.virtualGroupId == soughtGroupId
+                    || GroupContains(member.virtualGroupId, soughtGroupId, visited))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private void DissolveVirtualGroup(PsdUiToolkitVirtualGroupConfig group)
@@ -1451,12 +2540,32 @@ namespace PsdTools.UIToolKit
 
             ApplyLayoutMutation(() =>
             {
+                for (int i = 0; i < data.virtualGroups.Length; i++)
+                {
+                    PsdUiToolkitVirtualGroupConfig parent = data.virtualGroups[i];
+                    if (parent == null || parent == group)
+                        continue;
+                    List<PsdUiToolkitNodeReference> parentMembers =
+                        new List<PsdUiToolkitNodeReference>();
+                    for (int memberIndex = 0; memberIndex < parent.members.Length; memberIndex++)
+                    {
+                        PsdUiToolkitNodeReference reference = parent.members[memberIndex];
+                        if (reference.kind == PsdUiToolkitNodeReferenceKind.VirtualGroup
+                            && reference.virtualGroupId == group.id)
+                        {
+                            parentMembers.AddRange(group.members);
+                        }
+                        else
+                        {
+                            parentMembers.Add(reference);
+                        }
+                    }
+                    parent.members = parentMembers.ToArray();
+                }
                 data.virtualGroups = groups.ToArray();
                 _selectedVirtualGroup = null;
                 _selectedLayers.Clear();
-                _selectedLayer = group.memberLayerIds.Length == 0
-                    ? null
-                    : FindLayerById(group.memberLayerIds[0]);
+                _selectedLayer = FindFirstLayerMember(group);
                 if (_selectedLayer != null)
                     _selectedLayers.Add(_selectedLayer);
             });
@@ -1486,6 +2595,38 @@ namespace PsdTools.UIToolKit
             return null;
         }
 
+        private Layer FindFirstLayerMember(PsdUiToolkitVirtualGroupConfig group)
+        {
+            return FindFirstLayerMember(group, new HashSet<string>());
+        }
+
+        private Layer FindFirstLayerMember(
+            PsdUiToolkitVirtualGroupConfig group,
+            HashSet<string> visited)
+        {
+            if (group == null || !visited.Add(group.id))
+                return null;
+            for (int i = 0; i < group.members.Length; i++)
+            {
+                PsdUiToolkitNodeReference member = group.members[i];
+                if (member.kind == PsdUiToolkitNodeReferenceKind.Layer)
+                {
+                    Layer layer = FindLayerById(member.layerId);
+                    if (layer != null)
+                        return layer;
+                }
+                else
+                {
+                    Layer nested = FindFirstLayerMember(
+                        FindVirtualGroup(member.virtualGroupId),
+                        visited);
+                    if (nested != null)
+                        return nested;
+                }
+            }
+            return null;
+        }
+
         private void ApplyLayoutMutation(Action mutation)
         {
             if (mutation == null || _configData == null)
@@ -1494,7 +2635,6 @@ namespace PsdTools.UIToolKit
             mutation();
             PersistConfig();
             _layoutHistory.Record(_configData);
-            RefreshLayoutSuggestions();
             RefreshView();
         }
 
@@ -1524,7 +2664,6 @@ namespace PsdTools.UIToolKit
                 ? null
                 : FindVirtualGroup(selectedGroupId);
             PersistConfig();
-            RefreshLayoutSuggestions();
             RefreshView();
             UpdateStatus(undo ? "Undid layout edit." : "Redid layout edit.");
         }
@@ -1559,7 +2698,6 @@ namespace PsdTools.UIToolKit
         {
             _configData ??= new PsdUiToolkitExportConfigData();
             _configData = PsdUiToolkitConfigStore.MigrateToCurrentVersion(_configData);
-            _configData.autoLayout = _configData.autoLayout.GetValidated();
             _configData.layers ??= Array.Empty<PsdUiToolkitLayerConfig>();
             _configData.virtualGroups ??= Array.Empty<PsdUiToolkitVirtualGroupConfig>();
             return _configData;
@@ -1941,8 +3079,13 @@ namespace PsdTools.UIToolKit
                     : node.DisplayName,
             };
             PsdUiToolkitLayerBounds bounds = node.Bounds;
-            element.style.width = Math.Max(0f, bounds.Width * scale);
-            element.style.height = Math.Max(0f, bounds.Height * scale);
+            Vector2 previewSize = _layoutPreviewSizeOverrides.TryGetValue(
+                node.Reference,
+                out Vector2 overriddenSize)
+                    ? overriddenSize
+                    : new Vector2(bounds.Width, bounds.Height);
+            element.style.width = Math.Max(0f, previewSize.x * scale);
+            element.style.height = Math.Max(0f, previewSize.y * scale);
 
             if (placement.UseFlow)
             {
@@ -1965,6 +3108,8 @@ namespace PsdTools.UIToolKit
                     ? DisplayStyle.Flex
                     : DisplayStyle.None;
             }
+            if (!ShouldShowButtonPreviewNode(node.Reference))
+                element.style.display = DisplayStyle.None;
 
             PsdUiToolkitFlowContainerPlan flowPlan =
                 PsdUiToolkitFlowLayoutResolver.Resolve(node, _configMap);
@@ -2004,7 +3149,124 @@ namespace PsdTools.UIToolKit
 
             ApplyLayoutPreviewOutline(element, node);
             AddLayoutRoleBadge(element, node);
+            if (flowPlan.UseFlow
+                && flowPlan.WrapMode == PsdUiToolkitWrapMode.Wrap)
+            {
+                AddLayoutPreviewResizeHandle(
+                    element,
+                    node.Reference,
+                    previewSize,
+                    scale);
+            }
             return element;
+        }
+
+        private void AddLayoutPreviewResizeHandle(
+            VisualElement container,
+            PsdUiToolkitNodeReference reference,
+            Vector2 initialSize,
+            float scale)
+        {
+            if (container == null || !reference.IsValid || scale <= 0f)
+                return;
+
+            VisualElement handle = new VisualElement
+            {
+                tooltip = "Drag to resize this Wrap preview container. This is session-only and is not saved.",
+            };
+            handle.style.position = Position.Absolute;
+            handle.style.right = 0f;
+            handle.style.bottom = 0f;
+            handle.style.width = 12f;
+            handle.style.height = 12f;
+            handle.style.backgroundColor = new Color(1f, 0.62f, 0.12f, 0.95f);
+            handle.style.borderLeftWidth = 1f;
+            handle.style.borderTopWidth = 1f;
+            handle.style.borderLeftColor = Color.black;
+            handle.style.borderTopColor = Color.black;
+
+            Vector2 pointerStart = Vector2.zero;
+            Vector2 sizeStart = initialSize;
+            handle.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.button != 0)
+                    return;
+                pointerStart = evt.position;
+                sizeStart = _layoutPreviewSizeOverrides.TryGetValue(
+                    reference,
+                    out Vector2 current)
+                        ? current
+                        : initialSize;
+                handle.CapturePointer(evt.pointerId);
+                evt.StopPropagation();
+            });
+            handle.RegisterCallback<PointerMoveEvent>(evt =>
+            {
+                if (!handle.HasPointerCapture(evt.pointerId))
+                    return;
+                Vector2 delta = ((Vector2)evt.position - pointerStart) / scale;
+                Vector2 next = new Vector2(
+                    Mathf.Max(16f, sizeStart.x + delta.x),
+                    Mathf.Max(16f, sizeStart.y + delta.y));
+                _layoutPreviewSizeOverrides[reference] = next;
+                container.style.width = next.x * scale;
+                container.style.height = next.y * scale;
+                evt.StopPropagation();
+            });
+            handle.RegisterCallback<PointerUpEvent>(evt =>
+            {
+                if (!handle.HasPointerCapture(evt.pointerId))
+                    return;
+                handle.ReleasePointer(evt.pointerId);
+                evt.StopPropagation();
+            });
+            container.Add(handle);
+        }
+
+        private bool ShouldShowButtonPreviewNode(
+            PsdUiToolkitNodeReference reference)
+        {
+            if (!reference.IsValid || _configData?.buttons == null)
+                return true;
+
+            for (int buttonIndex = 0;
+                buttonIndex < _configData.buttons.Length;
+                buttonIndex++)
+            {
+                PsdUiToolkitButtonSemanticConfig button =
+                    _configData.buttons[buttonIndex];
+                if (button == null || button.states == null)
+                    continue;
+
+                bool isBoundState = false;
+                for (int stateIndex = 0;
+                    stateIndex < button.states.Length;
+                    stateIndex++)
+                {
+                    PsdUiToolkitButtonStateBinding binding =
+                        button.states[stateIndex];
+                    if (binding != null && binding.source.Equals(reference))
+                    {
+                        isBoundState = true;
+                        break;
+                    }
+                }
+                if (!isBoundState)
+                    continue;
+
+                if (!button.TryGetState(
+                    _previewButtonState,
+                    out PsdUiToolkitNodeReference active)
+                    && !button.TryGetState(
+                        PsdUiToolkitButtonVisualState.Normal,
+                        out active))
+                {
+                    return false;
+                }
+                return active.Equals(reference);
+            }
+
+            return true;
         }
 
         private static void ApplyLayoutPreviewContainerStyle(
@@ -2020,6 +3282,11 @@ namespace PsdTools.UIToolKit
                 : FlexDirection.Column;
             element.style.justifyContent = ResolvePreviewJustify(plan.MainAxisDistribution);
             element.style.alignItems = ResolvePreviewAlign(plan.CrossAxisAlignment);
+            element.style.flexWrap = plan.WrapMode == PsdUiToolkitWrapMode.Wrap
+                ? UnityEngine.UIElements.Wrap.Wrap
+                : UnityEngine.UIElements.Wrap.NoWrap;
+            element.style.alignContent = ResolvePreviewMultiLine(
+                plan.MultiLineDistribution);
             element.style.paddingLeft = plan.PaddingLeft * scale;
             element.style.paddingTop = plan.PaddingTop * scale;
             element.style.paddingRight = plan.PaddingRight * scale;
@@ -2051,6 +3318,20 @@ namespace PsdTools.UIToolKit
                 case PsdUiToolkitCrossAxisAlignment.Center:
                     return Align.Center;
                 case PsdUiToolkitCrossAxisAlignment.End:
+                    return Align.FlexEnd;
+                default:
+                    return Align.FlexStart;
+            }
+        }
+
+        private static Align ResolvePreviewMultiLine(
+            PsdUiToolkitMultiLineDistribution distribution)
+        {
+            switch (distribution)
+            {
+                case PsdUiToolkitMultiLineDistribution.Center:
+                    return Align.Center;
+                case PsdUiToolkitMultiLineDistribution.End:
                     return Align.FlexEnd;
                 default:
                     return Align.FlexStart;
@@ -2521,11 +3802,41 @@ namespace PsdTools.UIToolKit
                 return;
             }
 
-            if (recreate && existingEditable != null
+            Dictionary<string, string> copyPlan = null;
+            try
+            {
+                copyPlan = PsdUiToolkitExporter.BuildEditableCopyPlan(
+                    generatedPath,
+                    editablePath);
+            }
+            catch
+            {
+                // The exporter below reports the actionable missing-draft error.
+            }
+            List<string> existingFiles = new List<string>();
+            if (copyPlan != null)
+            {
+                foreach (string target in copyPlan.Values)
+                {
+                    if (File.Exists(PsdUiToolkitAssetPathUtility.GetDiskPath(target)))
+                        existingFiles.Add(target);
+                }
+            }
+            if (!recreate && existingFiles.Count > 0 && existingEditable == null)
+            {
+                EditorUtility.DisplayDialog(
+                    "Editable Assets Already Exist",
+                    "At least one editable USS or component file already exists, so no files were overwritten. Use Recreate Editable to replace the complete asset family.",
+                    "OK");
+                return;
+            }
+            if (recreate && existingFiles.Count > 0
                 && !EditorUtility.DisplayDialog(
-                    "Recreate Editable UXML",
-                    $"Replace '{editablePath}' with the current generated draft? UI Builder changes in this file will be lost.",
-                    "Replace",
+                    "Recreate Editable Asset Family",
+                    "The following UI Builder files will be replaced:\n\n"
+                    + string.Join("\n", existingFiles)
+                    + "\n\nAll changes in these files will be lost.",
+                    "Replace All",
                     "Cancel"))
             {
                 return;
@@ -2543,9 +3854,9 @@ namespace PsdTools.UIToolKit
                     AssetDatabase.OpenAsset(editableAsset);
                 }
 
-                UpdateStatus(existingEditable == null
-                    ? $"Created editable UXML: {resultPath}"
-                    : $"Recreated editable UXML: {resultPath}");
+                UpdateStatus(existingFiles.Count == 0
+                    ? $"Created editable asset family: {resultPath}"
+                    : $"Recreated editable asset family: {resultPath}");
             }
             catch (Exception ex)
             {

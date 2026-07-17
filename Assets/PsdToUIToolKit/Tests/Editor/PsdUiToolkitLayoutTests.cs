@@ -1,124 +1,150 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using NUnit.Framework;
 using PsdTools.Layers;
 using PsdTools.Psd;
-using UnityEngine;
+using UnityEditor;
+using UnityEngine.UIElements;
 
 namespace PsdTools.UIToolKit.Tests
 {
     public sealed class PsdUiToolkitLayoutTests
     {
-        [Test]
-        public void MigrateVersionTwo_PreservesExistingIntentAndUsesPsdAxisDefaults()
+        private const string GeneratedTestRoot =
+            "Assets/PsdToUIToolKit/Tests/GeneratedV4";
+
+        [TearDown]
+        public void TearDown()
         {
-            PsdUiToolkitExportConfigData data = new PsdUiToolkitExportConfigData
-            {
-                configVersion = 2,
-                layers = new[]
-                {
-                    new PsdUiToolkitLayerConfig
-                    {
-                        id = 7,
-                        childrenLayout = PsdUiToolkitContainerLayout.Row,
-                        itemRole = PsdUiToolkitItemRole.Background,
-                        mainAxisDistribution = PsdUiToolkitMainAxisDistribution.End,
-                        crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.Center,
-                    },
-                },
-                virtualGroups = new[]
-                {
-                    new PsdUiToolkitVirtualGroupConfig
-                    {
-                        id = "group",
-                        parentLayerId = -1,
-                        memberLayerIds = new[] { 1, 2 },
-                        layout = PsdUiToolkitContainerLayout.Column,
-                        mainAxisDistribution = PsdUiToolkitMainAxisDistribution.End,
-                        crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.Center,
-                    },
-                },
-            };
+            AssetDatabase.DeleteAsset(GeneratedTestRoot);
+        }
 
-            PsdUiToolkitConfigStore.MigrateToCurrentVersion(data);
+        [Test]
+        public void MigrateVersionOne_MapsParticipationAndRemovesUnspecified()
+        {
+            const string json =
+                "{\"configVersion\":1,\"layers\":["
+                + "{\"id\":1,\"participateInAutoLayout\":false,\"childrenLayout\":0},"
+                + "{\"id\":2,\"participateInAutoLayout\":true,\"childrenLayout\":0}"
+                + "]}";
 
-            Assert.That(data.configVersion, Is.EqualTo(3));
-            Assert.That(data.layers[0].childrenLayout, Is.EqualTo(PsdUiToolkitContainerLayout.Row));
-            Assert.That(data.layers[0].itemRole, Is.EqualTo(PsdUiToolkitItemRole.Background));
+            PsdUiToolkitExportConfigData data =
+                PsdUiToolkitConfigStore.DeserializeAndMigrate(json);
+
+            Assert.That(data.configVersion, Is.EqualTo(4));
+            Assert.That(
+                data.layers[0].itemRole,
+                Is.EqualTo(PsdUiToolkitItemRole.KeepAbsolute));
+            Assert.That(
+                data.layers[1].itemRole,
+                Is.EqualTo(PsdUiToolkitItemRole.FollowParent));
+            Assert.That(
+                data.layers[0].childrenLayout,
+                Is.EqualTo(PsdUiToolkitContainerLayout.Absolute));
+        }
+
+        [Test]
+        public void MigrateVersionThree_PreservesManualIntentAndAxes()
+        {
+            const string json =
+                "{\"configVersion\":3,\"layers\":[{"
+                + "\"id\":7,\"childrenLayout\":2,\"itemRole\":2,"
+                + "\"mainAxisDistribution\":3,\"crossAxisAlignment\":2"
+                + "}],\"virtualGroups\":[{"
+                + "\"id\":\"group\",\"name\":\"Footer\",\"parentLayerId\":-1,"
+                + "\"memberLayerIds\":[1,2],\"layout\":3,"
+                + "\"mainAxisDistribution\":5,\"crossAxisAlignment\":3"
+                + "}]}";
+
+            PsdUiToolkitExportConfigData data =
+                PsdUiToolkitConfigStore.DeserializeAndMigrate(json);
+
+            Assert.That(data.configVersion, Is.EqualTo(4));
+            Assert.That(
+                data.layers[0].childrenLayout,
+                Is.EqualTo(PsdUiToolkitContainerLayout.Row));
+            Assert.That(
+                data.layers[0].itemRole,
+                Is.EqualTo(PsdUiToolkitItemRole.Background));
+            Assert.That(
+                data.layers[0].mainAxisDistribution,
+                Is.EqualTo(PsdUiToolkitMainAxisDistribution.End));
+            Assert.That(data.virtualGroups[0].members, Has.Length.EqualTo(2));
+            Assert.That(
+                data.virtualGroups[0].members[1],
+                Is.EqualTo(PsdUiToolkitNodeReference.Layer(2)));
+            Assert.That(
+                data.virtualGroups[0].crossAxisAlignment,
+                Is.EqualTo(PsdUiToolkitCrossAxisAlignment.End));
+        }
+
+        [Test]
+        public void MigrateVersionTwo_PreservesLayoutButUsesPsdAxisDefaults()
+        {
+            const string json =
+                "{\"configVersion\":2,\"layers\":[{"
+                + "\"id\":9,\"childrenLayout\":3,\"itemRole\":1,"
+                + "\"mainAxisDistribution\":3,\"crossAxisAlignment\":2"
+                + "}]}";
+
+            PsdUiToolkitExportConfigData data =
+                PsdUiToolkitConfigStore.DeserializeAndMigrate(json);
+
+            Assert.That(
+                data.layers[0].childrenLayout,
+                Is.EqualTo(PsdUiToolkitContainerLayout.Column));
+            Assert.That(
+                data.layers[0].itemRole,
+                Is.EqualTo(PsdUiToolkitItemRole.KeepAbsolute));
             Assert.That(
                 data.layers[0].mainAxisDistribution,
                 Is.EqualTo(PsdUiToolkitMainAxisDistribution.PreservePsd));
             Assert.That(
                 data.layers[0].crossAxisAlignment,
                 Is.EqualTo(PsdUiToolkitCrossAxisAlignment.PreservePsd));
-            Assert.That(
-                data.virtualGroups[0].mainAxisDistribution,
-                Is.EqualTo(PsdUiToolkitMainAxisDistribution.PreservePsd));
-            Assert.That(
-                data.virtualGroups[0].crossAxisAlignment,
-                Is.EqualTo(PsdUiToolkitCrossAxisAlignment.PreservePsd));
         }
 
         [Test]
-        public void MigrateVersionOne_MapsLegacyParticipationBeforeVersionThree()
+        public void SerializeVersionFour_DoesNotWriteLegacyDetectionFields()
         {
-            PsdUiToolkitExportConfigData data = new PsdUiToolkitExportConfigData
-            {
-                configVersion = 1,
-                layers = new[]
+            PsdUiToolkitExportConfigData data =
+                new PsdUiToolkitExportConfigData
                 {
-                    new PsdUiToolkitLayerConfig
+                    layers = new[]
                     {
-                        id = 1,
-                        participateInAutoLayout = false,
+                        new PsdUiToolkitLayerConfig { id = 1 },
                     },
-                    new PsdUiToolkitLayerConfig
-                    {
-                        id = 2,
-                        participateInAutoLayout = true,
-                    },
-                },
-            };
+                };
 
-            PsdUiToolkitConfigStore.MigrateToCurrentVersion(data);
+            string json = PsdUiToolkitConfigStore.Serialize(data);
 
-            Assert.That(data.layers[0].itemRole, Is.EqualTo(PsdUiToolkitItemRole.KeepAbsolute));
-            Assert.That(data.layers[1].itemRole, Is.EqualTo(PsdUiToolkitItemRole.FollowParent));
-            Assert.That(
-                data.layers[0].mainAxisDistribution,
-                Is.EqualTo(PsdUiToolkitMainAxisDistribution.PreservePsd));
+            Assert.That(json, Does.Not.Contain("autoLayout"));
+            Assert.That(json, Does.Not.Contain("participateInAutoLayout"));
+            Assert.That(json, Does.Not.Contain("confidence"));
+            Assert.That(json, Does.Not.Contain("Grid"));
         }
 
         [Test]
-        public void Sanitize_InvalidAxisValues_ReturnsToPsdDefaults()
+        public void NewLayerAndInvalidValues_SanitizeToAbsoluteDefaults()
         {
             PsdUiToolkitLayerConfig layer = new PsdUiToolkitLayerConfig
             {
-                mainAxisDistribution = (PsdUiToolkitMainAxisDistribution)999,
-                crossAxisAlignment = (PsdUiToolkitCrossAxisAlignment)999,
-            };
-            PsdUiToolkitVirtualGroupConfig group = new PsdUiToolkitVirtualGroupConfig
-            {
-                memberLayerIds = new[] { 1, 2 },
-                mainAxisDistribution = (PsdUiToolkitMainAxisDistribution)999,
-                crossAxisAlignment = (PsdUiToolkitCrossAxisAlignment)999,
+                childrenLayout = PsdUiToolkitContainerLayout.Unspecified,
+                wrapMode = (PsdUiToolkitWrapMode)999,
+                multiLineDistribution =
+                    (PsdUiToolkitMultiLineDistribution)999,
             };
 
             layer.Sanitize();
-            group.Sanitize();
 
             Assert.That(
-                layer.mainAxisDistribution,
-                Is.EqualTo(PsdUiToolkitMainAxisDistribution.PreservePsd));
+                layer.childrenLayout,
+                Is.EqualTo(PsdUiToolkitContainerLayout.Absolute));
+            Assert.That(layer.wrapMode, Is.EqualTo(PsdUiToolkitWrapMode.NoWrap));
             Assert.That(
-                layer.crossAxisAlignment,
-                Is.EqualTo(PsdUiToolkitCrossAxisAlignment.PreservePsd));
-            Assert.That(
-                group.mainAxisDistribution,
-                Is.EqualTo(PsdUiToolkitMainAxisDistribution.PreservePsd));
-            Assert.That(
-                group.crossAxisAlignment,
-                Is.EqualTo(PsdUiToolkitCrossAxisAlignment.PreservePsd));
+                layer.multiLineDistribution,
+                Is.EqualTo(PsdUiToolkitMultiLineDistribution.PreservePsd));
         }
 
         [Test]
@@ -128,8 +154,10 @@ namespace PsdTools.UIToolKit.Tests
             PsdUiToolkitLayoutNode second = CreateLeaf(40, 9, 20, 10, 1);
             PsdUiToolkitLayoutNode parent = CreateContainer(
                 PsdUiToolkitLayoutType.Row,
+                PsdUiToolkitWrapMode.NoWrap,
                 PsdUiToolkitMainAxisDistribution.PreservePsd,
                 PsdUiToolkitCrossAxisAlignment.PreservePsd,
+                PsdUiToolkitMultiLineDistribution.PreservePsd,
                 first,
                 second);
 
@@ -141,187 +169,431 @@ namespace PsdTools.UIToolKit.Tests
             Assert.That(plan.PaddingTop, Is.EqualTo(5));
             Assert.That(plan.PaddingRight, Is.EqualTo(40));
             Assert.That(plan.PaddingBottom, Is.EqualTo(21));
-            Assert.That(plan.Placements[first].MarginLeft, Is.Zero);
-            Assert.That(plan.Placements[first].MarginTop, Is.Zero);
             Assert.That(plan.Placements[second].MarginLeft, Is.EqualTo(10));
             Assert.That(plan.Placements[second].MarginTop, Is.EqualTo(4));
         }
 
         [Test]
-        public void ResolveRow_SemanticAxes_ClearOnlyGeneratedChildOffsets()
+        public void ResolveWrap_DerivesRepresentativeItemAndLineGaps()
         {
-            PsdUiToolkitLayoutNode first = CreateLeaf(10, 5, 20, 10, 0);
-            PsdUiToolkitLayoutNode second = CreateLeaf(40, 9, 20, 10, 1);
+            PsdUiToolkitLayoutNode first = CreateLeaf(5, 5, 20, 10, 0);
+            PsdUiToolkitLayoutNode second = CreateLeaf(35, 5, 20, 10, 1);
+            PsdUiToolkitLayoutNode third = CreateLeaf(5, 23, 20, 10, 2);
+            PsdUiToolkitLayoutNode fourth = CreateLeaf(35, 23, 20, 10, 3);
             PsdUiToolkitLayoutNode parent = CreateContainer(
                 PsdUiToolkitLayoutType.Row,
-                PsdUiToolkitMainAxisDistribution.SpaceBetween,
-                PsdUiToolkitCrossAxisAlignment.End,
+                PsdUiToolkitWrapMode.Wrap,
+                PsdUiToolkitMainAxisDistribution.PreservePsd,
+                PsdUiToolkitCrossAxisAlignment.PreservePsd,
+                PsdUiToolkitMultiLineDistribution.PreservePsd,
+                first,
+                second,
+                third,
+                fourth);
+
+            PsdUiToolkitFlowContainerPlan plan =
+                PsdUiToolkitFlowLayoutResolver.Resolve(parent, CreateConfigMap());
+
+            Assert.That(plan.WrapMode, Is.EqualTo(PsdUiToolkitWrapMode.Wrap));
+            Assert.That(plan.DerivedMainGap, Is.EqualTo(10));
+            Assert.That(plan.DerivedLineGap, Is.EqualTo(8));
+            Assert.That(plan.Placements[second].MarginLeft, Is.EqualTo(10));
+            Assert.That(plan.Placements[third].MarginTop, Is.EqualTo(8));
+        }
+
+        [TestCase(PsdUiToolkitMultiLineDistribution.Start)]
+        [TestCase(PsdUiToolkitMultiLineDistribution.Center)]
+        [TestCase(PsdUiToolkitMultiLineDistribution.End)]
+        public void ResolveWrap_SemanticLineDistributionClearsPsdLineOffset(
+            PsdUiToolkitMultiLineDistribution distribution)
+        {
+            PsdUiToolkitLayoutNode first = CreateLeaf(5, 5, 20, 10, 0);
+            PsdUiToolkitLayoutNode second = CreateLeaf(5, 25, 20, 10, 1);
+            PsdUiToolkitLayoutNode parent = CreateContainer(
+                PsdUiToolkitLayoutType.Row,
+                PsdUiToolkitWrapMode.Wrap,
+                PsdUiToolkitMainAxisDistribution.PreservePsd,
+                PsdUiToolkitCrossAxisAlignment.PreservePsd,
+                distribution,
                 first,
                 second);
 
             PsdUiToolkitFlowContainerPlan plan =
                 PsdUiToolkitFlowLayoutResolver.Resolve(parent, CreateConfigMap());
 
-            Assert.That(
-                plan.MainAxisDistribution,
-                Is.EqualTo(PsdUiToolkitMainAxisDistribution.SpaceBetween));
-            Assert.That(
-                plan.CrossAxisAlignment,
-                Is.EqualTo(PsdUiToolkitCrossAxisAlignment.End));
-            Assert.That(plan.Placements[first].MarginLeft, Is.Zero);
-            Assert.That(plan.Placements[first].MarginTop, Is.Zero);
-            Assert.That(plan.Placements[second].MarginLeft, Is.Zero);
+            Assert.That(plan.MultiLineDistribution, Is.EqualTo(distribution));
             Assert.That(plan.Placements[second].MarginTop, Is.Zero);
-            Assert.That(plan.PaddingLeft, Is.EqualTo(10));
-            Assert.That(plan.PaddingTop, Is.EqualTo(5));
         }
 
-        [Test]
-        public void ResolveColumn_PreservesVerticalGapAndHorizontalOffset()
+        [TestCase(PsdUiToolkitMainAxisDistribution.PreservePsd)]
+        [TestCase(PsdUiToolkitMainAxisDistribution.Start)]
+        [TestCase(PsdUiToolkitMainAxisDistribution.Center)]
+        [TestCase(PsdUiToolkitMainAxisDistribution.End)]
+        [TestCase(PsdUiToolkitMainAxisDistribution.SpaceBetween)]
+        [TestCase(PsdUiToolkitMainAxisDistribution.SpaceAround)]
+        public void ResolveRow_PreservesEveryMainAxisChoice(
+            PsdUiToolkitMainAxisDistribution distribution)
         {
-            PsdUiToolkitLayoutNode first = CreateLeaf(12, 4, 20, 10, 0);
-            PsdUiToolkitLayoutNode second = CreateLeaf(18, 24, 20, 10, 1);
+            PsdUiToolkitLayoutNode first = CreateLeaf(5, 5, 20, 10, 0);
+            PsdUiToolkitLayoutNode second = CreateLeaf(35, 5, 20, 10, 1);
             PsdUiToolkitLayoutNode parent = CreateContainer(
-                PsdUiToolkitLayoutType.Column,
-                PsdUiToolkitMainAxisDistribution.PreservePsd,
+                PsdUiToolkitLayoutType.Row,
+                PsdUiToolkitWrapMode.NoWrap,
+                distribution,
                 PsdUiToolkitCrossAxisAlignment.PreservePsd,
+                PsdUiToolkitMultiLineDistribution.PreservePsd,
                 first,
                 second);
 
             PsdUiToolkitFlowContainerPlan plan =
                 PsdUiToolkitFlowLayoutResolver.Resolve(parent, CreateConfigMap());
 
-            Assert.That(plan.Placements[second].MarginTop, Is.EqualTo(10));
-            Assert.That(plan.Placements[second].MarginLeft, Is.EqualTo(6));
+            Assert.That(plan.MainAxisDistribution, Is.EqualTo(distribution));
+            Assert.That(
+                plan.Placements[second].MarginLeft,
+                Is.EqualTo(
+                    distribution
+                        == PsdUiToolkitMainAxisDistribution.PreservePsd
+                            ? 10
+                            : 0));
         }
 
-        [Test]
-        public void ResolveRow_OnlyFollowParentItemsParticipateInFlow()
+        [TestCase(PsdUiToolkitCrossAxisAlignment.PreservePsd)]
+        [TestCase(PsdUiToolkitCrossAxisAlignment.Start)]
+        [TestCase(PsdUiToolkitCrossAxisAlignment.Center)]
+        [TestCase(PsdUiToolkitCrossAxisAlignment.End)]
+        public void ResolveRow_PreservesEveryCrossAxisChoice(
+            PsdUiToolkitCrossAxisAlignment alignment)
         {
-            PsdUiToolkitLayoutNode background = CreateLayerNode(
-                0,
-                PsdUiToolkitItemRole.Background);
-            PsdUiToolkitLayoutNode flow = CreateLayerNode(
-                1,
-                PsdUiToolkitItemRole.FollowParent);
-            PsdUiToolkitLayoutNode overlay = CreateLayerNode(
-                2,
-                PsdUiToolkitItemRole.KeepAbsolute);
+            PsdUiToolkitLayoutNode first = CreateLeaf(5, 5, 20, 10, 0);
+            PsdUiToolkitLayoutNode second = CreateLeaf(35, 9, 20, 10, 1);
             PsdUiToolkitLayoutNode parent = CreateContainer(
                 PsdUiToolkitLayoutType.Row,
+                PsdUiToolkitWrapMode.NoWrap,
                 PsdUiToolkitMainAxisDistribution.PreservePsd,
-                PsdUiToolkitCrossAxisAlignment.PreservePsd,
-                background,
-                flow,
-                overlay);
+                alignment,
+                PsdUiToolkitMultiLineDistribution.PreservePsd,
+                first,
+                second);
 
             PsdUiToolkitFlowContainerPlan plan =
                 PsdUiToolkitFlowLayoutResolver.Resolve(parent, CreateConfigMap());
 
-            Assert.That(plan.FlowChildren, Is.EqualTo(new[] { flow }));
-            Assert.That(plan.Placements.ContainsKey(background), Is.False);
-            Assert.That(plan.Placements.ContainsKey(flow), Is.True);
-            Assert.That(plan.Placements.ContainsKey(overlay), Is.False);
+            Assert.That(plan.CrossAxisAlignment, Is.EqualTo(alignment));
+            Assert.That(
+                plan.Placements[second].MarginTop,
+                Is.EqualTo(
+                    alignment
+                        == PsdUiToolkitCrossAxisAlignment.PreservePsd
+                            ? 4
+                            : 0));
         }
 
         [Test]
-        public void ConfigJsonRoundTrip_PreservesVirtualGroupAxisSettings()
+        public void NestedVirtualGroups_RoundTripTwentyOneLevels()
         {
-            PsdUiToolkitExportConfigData data = new PsdUiToolkitExportConfigData
+            List<PsdUiToolkitVirtualGroupConfig> groups =
+                new List<PsdUiToolkitVirtualGroupConfig>();
+            PsdUiToolkitNodeReference member = PsdUiToolkitNodeReference.Layer(1);
+            for (int i = 0; i < 21; i++)
             {
-                configVersion = 3,
-                virtualGroups = new[]
+                string id = $"group-{i}";
+                groups.Add(new PsdUiToolkitVirtualGroupConfig
                 {
-                    new PsdUiToolkitVirtualGroupConfig
-                    {
-                        id = "group",
-                        name = "Footer",
-                        memberLayerIds = new[] { 4, 5 },
-                        layout = PsdUiToolkitContainerLayout.Column,
-                        mainAxisDistribution = PsdUiToolkitMainAxisDistribution.SpaceAround,
-                        crossAxisAlignment = PsdUiToolkitCrossAxisAlignment.End,
-                    },
-                },
-            };
+                    id = id,
+                    name = id,
+                    hostParentLayerId = -1,
+                    members = new[] { member },
+                    layout = i % 2 == 0
+                        ? PsdUiToolkitContainerLayout.Row
+                        : PsdUiToolkitContainerLayout.Column,
+                    wrapMode = PsdUiToolkitWrapMode.Wrap,
+                });
+                member = PsdUiToolkitNodeReference.VirtualGroup(id);
+            }
+            PsdUiToolkitExportConfigData data =
+                new PsdUiToolkitExportConfigData
+                {
+                    virtualGroups = groups.ToArray(),
+                };
 
-            string json = JsonUtility.ToJson(data);
             PsdUiToolkitExportConfigData restored =
-                JsonUtility.FromJson<PsdUiToolkitExportConfigData>(json);
-            PsdUiToolkitConfigStore.MigrateToCurrentVersion(restored);
+                PsdUiToolkitConfigStore.DeserializeAndMigrate(
+                    PsdUiToolkitConfigStore.Serialize(data));
 
-            Assert.That(restored.virtualGroups, Has.Length.EqualTo(1));
+            Assert.That(restored.virtualGroups, Has.Length.EqualTo(21));
             Assert.That(
-                restored.virtualGroups[0].mainAxisDistribution,
-                Is.EqualTo(PsdUiToolkitMainAxisDistribution.SpaceAround));
+                restored.virtualGroups[20].members[0],
+                Is.EqualTo(PsdUiToolkitNodeReference.VirtualGroup("group-19")));
             Assert.That(
-                restored.virtualGroups[0].crossAxisAlignment,
-                Is.EqualTo(PsdUiToolkitCrossAxisAlignment.End));
+                restored.virtualGroups[20].wrapMode,
+                Is.EqualTo(PsdUiToolkitWrapMode.Wrap));
         }
 
         [Test]
-        public void LayoutHistory_UndoAndRedo_DoNotTouchExportFields()
+        public void ButtonWriter_UsesStandardButtonAndOrderedPseudoStates()
+        {
+            PsdUiToolkitLayoutNode normal = CreateVirtualLeaf(
+                "normal",
+                0,
+                0,
+                40,
+                20,
+                0);
+            PsdUiToolkitLayoutNode hover = CreateVirtualLeaf(
+                "hover",
+                0,
+                0,
+                40,
+                20,
+                1);
+            PsdUiToolkitLayoutNode buttonRoot = CreateVirtualContainer(
+                "button",
+                normal,
+                hover);
+            PsdUiToolkitExportConfigData data =
+                new PsdUiToolkitExportConfigData
+                {
+                    buttons = new[]
+                    {
+                        new PsdUiToolkitButtonSemanticConfig
+                        {
+                            owner = buttonRoot.Reference,
+                            states = new[]
+                            {
+                                new PsdUiToolkitButtonStateBinding
+                                {
+                                    state = PsdUiToolkitButtonVisualState.Normal,
+                                    source = normal.Reference,
+                                },
+                                new PsdUiToolkitButtonStateBinding
+                                {
+                                    state = PsdUiToolkitButtonVisualState.Hover,
+                                    source = hover.Reference,
+                                },
+                            },
+                        },
+                    },
+                };
+            WriteLayout(
+                "Button",
+                new[] { buttonRoot },
+                data,
+                Array.Empty<PsdUiToolkitComponentExportArtifact>(),
+                out string uxml,
+                out string uss);
+
+            Assert.That(uxml, Does.Contain("<ui:Button"));
+            Assert.That(uss, Does.Contain(":hover"));
+            Assert.That(uss, Does.Contain(":active"));
+            Assert.That(uss, Does.Contain(":disabled"));
+            Assert.That(
+                uss.IndexOf(":disabled", StringComparison.Ordinal),
+                Is.GreaterThan(uss.IndexOf(":active", StringComparison.Ordinal)));
+            AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+            Assert.That(
+                AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
+                    GeneratedTestRoot + "/Button.generated.uxml"),
+                Is.Not.Null);
+        }
+
+        [Test]
+        public void Writer_WithoutV4Semantics_KeepsLegacyUxmlShape()
+        {
+            WriteLayout(
+                "Legacy",
+                new[] { CreateVirtualLeaf("leaf", 0, 0, 20, 10, 0) },
+                new PsdUiToolkitExportConfigData(),
+                Array.Empty<PsdUiToolkitComponentExportArtifact>(),
+                out string uxml,
+                out string uss);
+
+            Assert.That(uxml, Does.Not.Contain("<ui:Style"));
+            Assert.That(uxml, Does.Not.Contain("<ui:Template"));
+            Assert.That(uxml, Does.Not.Contain("<ui:Button"));
+            Assert.That(uss, Does.Contain("Generated by PSDToUIToolKit"));
+        }
+
+        [Test]
+        public void ComponentWriter_GeneratesTemplateInstanceAndContentContainer()
+        {
+            PsdUiToolkitLayoutNode content = CreateVirtualLeaf(
+                "content",
+                0,
+                0,
+                20,
+                10,
+                0);
+            PsdUiToolkitLayoutNode definitionRoot =
+                CreateVirtualContainer("definition-root", content);
+            PsdUiToolkitLayoutNode instanceRoot = CreateVirtualLeaf(
+                "instance-root",
+                60,
+                0,
+                40,
+                20,
+                1);
+            const string componentId = "component-12345678";
+            PsdUiToolkitExportConfigData data =
+                new PsdUiToolkitExportConfigData
+                {
+                    componentDefinitions = new[]
+                    {
+                        new PsdUiToolkitComponentDefinitionConfig
+                        {
+                            id = componentId,
+                            name = "Card",
+                            root = definitionRoot.Reference,
+                            hasContentContainer = true,
+                            contentContainer = content.Reference,
+                        },
+                    },
+                    componentInstances = new[]
+                    {
+                        new PsdUiToolkitComponentInstanceConfig
+                        {
+                            owner = instanceRoot.Reference,
+                            componentId = componentId,
+                        },
+                    },
+                };
+            PsdUiToolkitComponentExportArtifact artifact =
+                new PsdUiToolkitComponentExportArtifact
+                {
+                    ComponentId = componentId,
+                    Name = "Card",
+                    GeneratedUxmlAssetPath =
+                        GeneratedTestRoot + "/Components/Card.generated.uxml",
+                    GeneratedUssAssetPath =
+                        GeneratedTestRoot + "/Components/Card.generated.uss",
+                    EditableUxmlAssetPath =
+                        GeneratedTestRoot + "/Components/Card.uxml",
+                    EditableUssAssetPath =
+                        GeneratedTestRoot + "/Components/Card.uss",
+                };
+
+            WriteLayout(
+                "Components",
+                new[] { definitionRoot, instanceRoot },
+                data,
+                new[] { artifact },
+                out string page,
+                out _);
+            string component = File.ReadAllText(
+                PsdUiToolkitAssetPathUtility.GetDiskPath(
+                    artifact.GeneratedUxmlAssetPath));
+
+            Assert.That(page, Does.Contain("<ui:Template"));
+            Assert.That(page, Does.Contain("<ui:Instance"));
+            Assert.That(component, Does.Contain("content-container=\"content\""));
+
+            string editablePage =
+                GeneratedTestRoot + "/Components.uxml";
+            PsdUiToolkitExporter.CreateEditableCopy(
+                GeneratedTestRoot + "/Components.generated.uxml",
+                editablePage);
+            string editableText = File.ReadAllText(
+                PsdUiToolkitAssetPathUtility.GetDiskPath(editablePage));
+            Assert.That(
+                File.Exists(PsdUiToolkitAssetPathUtility.GetDiskPath(
+                    GeneratedTestRoot + "/Components.uss")),
+                Is.True);
+            Assert.That(
+                File.Exists(PsdUiToolkitAssetPathUtility.GetDiskPath(
+                    artifact.EditableUxmlAssetPath)),
+                Is.True);
+            Assert.That(
+                File.Exists(PsdUiToolkitAssetPathUtility.GetDiskPath(
+                    artifact.EditableUssAssetPath)),
+                Is.True);
+            Assert.That(editableText, Does.Not.Contain(".generated."));
+            Assert.That(
+                AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
+                    GeneratedTestRoot + "/Components.generated.uxml"),
+                Is.Not.Null);
+            Assert.That(
+                AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
+                    artifact.GeneratedUxmlAssetPath),
+                Is.Not.Null);
+            Assert.That(
+                AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(editablePage),
+                Is.Not.Null);
+        }
+
+        [Test]
+        public void LayoutHistory_RestoresSemanticsWithoutTouchingExportFields()
         {
             PsdUiToolkitLayerConfig layer = new PsdUiToolkitLayerConfig
             {
                 id = 10,
                 exported = true,
-                childrenLayout = PsdUiToolkitContainerLayout.Unspecified,
+                childrenLayout = PsdUiToolkitContainerLayout.Absolute,
             };
-            PsdUiToolkitExportConfigData data = new PsdUiToolkitExportConfigData
-            {
-                configVersion = 3,
-                layers = new[] { layer },
-            };
-            PsdUiToolkitLayoutEditHistory history = new PsdUiToolkitLayoutEditHistory();
+            PsdUiToolkitExportConfigData data =
+                new PsdUiToolkitExportConfigData
+                {
+                    layers = new[] { layer },
+                };
+            PsdUiToolkitLayoutEditHistory history =
+                new PsdUiToolkitLayoutEditHistory();
             history.Reset(data);
             layer.childrenLayout = PsdUiToolkitContainerLayout.Row;
+            data.buttons = new[]
+            {
+                new PsdUiToolkitButtonSemanticConfig
+                {
+                    owner = PsdUiToolkitNodeReference.Layer(10),
+                },
+            };
             history.Record(data);
             layer.exported = false;
 
             Assert.That(history.Undo(data), Is.True);
-            Assert.That(layer.childrenLayout, Is.EqualTo(PsdUiToolkitContainerLayout.Unspecified));
+            Assert.That(
+                layer.childrenLayout,
+                Is.EqualTo(PsdUiToolkitContainerLayout.Absolute));
+            Assert.That(data.buttons, Is.Empty);
             Assert.That(layer.exported, Is.False);
-
             Assert.That(history.Redo(data), Is.True);
-            Assert.That(layer.childrenLayout, Is.EqualTo(PsdUiToolkitContainerLayout.Row));
+            Assert.That(
+                layer.childrenLayout,
+                Is.EqualTo(PsdUiToolkitContainerLayout.Row));
+            Assert.That(data.buttons, Has.Length.EqualTo(1));
             Assert.That(layer.exported, Is.False);
         }
 
-        [Test]
-        public void LayoutHistory_RestoresVirtualGroupsAsIndependentCopies()
+        private static void WriteLayout(
+            string name,
+            PsdUiToolkitLayoutNode[] nodes,
+            PsdUiToolkitExportConfigData data,
+            PsdUiToolkitComponentExportArtifact[] artifacts,
+            out string uxml,
+            out string uss)
         {
-            PsdUiToolkitExportConfigData data = new PsdUiToolkitExportConfigData
-            {
-                configVersion = 3,
-                virtualGroups = Array.Empty<PsdUiToolkitVirtualGroupConfig>(),
-            };
-            PsdUiToolkitLayoutEditHistory history = new PsdUiToolkitLayoutEditHistory();
-            history.Reset(data);
-            data.virtualGroups = new[]
-            {
-                new PsdUiToolkitVirtualGroupConfig
-                {
-                    id = "group",
-                    name = "Buttons",
-                    memberLayerIds = new[] { 1, 2 },
-                    layout = PsdUiToolkitContainerLayout.Row,
-                },
-            };
-            history.Record(data);
-
-            Assert.That(history.Undo(data), Is.True);
-            Assert.That(data.virtualGroups, Is.Empty);
-            Assert.That(history.Redo(data), Is.True);
-            Assert.That(data.virtualGroups, Has.Length.EqualTo(1));
-            Assert.That(data.virtualGroups[0].name, Is.EqualTo("Buttons"));
+            string pageUxml = GeneratedTestRoot + $"/{name}.generated.uxml";
+            string pageUss = GeneratedTestRoot + $"/{name}.generated.uss";
+            PsdUiToolkitUxmlWriter.Write(
+                new PsdUiToolkitLayoutTree(
+                    name,
+                    200,
+                    100,
+                    new List<PsdUiToolkitLayoutNode>(nodes)),
+                new PsdUiToolkitLayerConfigMap(data),
+                new PsdUiToolkitRasterExportResult(),
+                null,
+                pageUxml,
+                pageUss,
+                artifacts);
+            uxml = File.ReadAllText(
+                PsdUiToolkitAssetPathUtility.GetDiskPath(pageUxml));
+            uss = File.ReadAllText(
+                PsdUiToolkitAssetPathUtility.GetDiskPath(pageUss));
         }
 
         private static PsdUiToolkitLayerConfigMap CreateConfigMap()
         {
-            return new PsdUiToolkitLayerConfigMap(new PsdUiToolkitExportConfigData
-            {
-                configVersion = 3,
-            });
+            return new PsdUiToolkitLayerConfigMap(
+                new PsdUiToolkitExportConfigData());
         }
 
         private static PsdUiToolkitLayoutNode CreateLeaf(
@@ -336,45 +608,54 @@ namespace PsdTools.UIToolKit.Tests
                 new PsdUiToolkitLayerBounds(left, top, width, height),
                 true,
                 PsdUiToolkitLayoutType.Absolute,
-                0f,
-                string.Empty,
                 originalIndex,
                 new List<PsdUiToolkitLayoutNode>(),
                 $"Leaf{originalIndex}",
                 true);
         }
 
-        private static PsdUiToolkitLayoutNode CreateLayerNode(
-            int originalIndex,
-            PsdUiToolkitItemRole itemRole)
+        private static PsdUiToolkitLayoutNode CreateVirtualLeaf(
+            string id,
+            int left,
+            int top,
+            int width,
+            int height,
+            int originalIndex)
         {
-            Layer layer = new Layer(
-                new LayerRecord
-                {
-                    Left = originalIndex * 20,
-                    Top = 0,
-                    Right = originalIndex * 20 + 10,
-                    Bottom = 10,
-                },
-                new FileHeader());
             return new PsdUiToolkitLayoutNode(
-                layer,
-                new PsdUiToolkitLayerBounds(originalIndex * 20, 0, 10, 10),
+                null,
+                new PsdUiToolkitLayerBounds(left, top, width, height),
                 true,
                 PsdUiToolkitLayoutType.Absolute,
-                0f,
-                string.Empty,
                 originalIndex,
                 new List<PsdUiToolkitLayoutNode>(),
-                $"Layer{originalIndex}",
+                id,
+                true,
+                virtualGroupId: id);
+        }
+
+        private static PsdUiToolkitLayoutNode CreateVirtualContainer(
+            string id,
+            params PsdUiToolkitLayoutNode[] children)
+        {
+            return new PsdUiToolkitLayoutNode(
+                null,
+                new PsdUiToolkitLayerBounds(0, 0, 100, 40),
                 false,
-                itemRole: itemRole);
+                PsdUiToolkitLayoutType.Absolute,
+                0,
+                new List<PsdUiToolkitLayoutNode>(children),
+                id,
+                true,
+                virtualGroupId: id);
         }
 
         private static PsdUiToolkitLayoutNode CreateContainer(
             PsdUiToolkitLayoutType layout,
+            PsdUiToolkitWrapMode wrap,
             PsdUiToolkitMainAxisDistribution mainAxis,
             PsdUiToolkitCrossAxisAlignment crossAxis,
+            PsdUiToolkitMultiLineDistribution multiLine,
             params PsdUiToolkitLayoutNode[] children)
         {
             return new PsdUiToolkitLayoutNode(
@@ -382,14 +663,14 @@ namespace PsdTools.UIToolKit.Tests
                 new PsdUiToolkitLayerBounds(0, 0, 100, 40),
                 false,
                 layout,
-                1f,
-                string.Empty,
                 0,
                 new List<PsdUiToolkitLayoutNode>(children),
                 "Container",
                 true,
                 mainAxisDistribution: mainAxis,
-                crossAxisAlignment: crossAxis);
+                crossAxisAlignment: crossAxis,
+                wrapMode: wrap,
+                multiLineDistribution: multiLine);
         }
     }
 }
