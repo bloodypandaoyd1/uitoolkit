@@ -176,8 +176,6 @@ namespace PsdTools.UIToolKit
             data.layers ??= Array.Empty<PsdUiToolkitLayerConfig>();
             data.virtualGroups ??= Array.Empty<PsdUiToolkitVirtualGroupConfig>();
             data.buttons ??= Array.Empty<PsdUiToolkitButtonSemanticConfig>();
-            data.componentDefinitions ??= Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
-            data.componentInstances ??= Array.Empty<PsdUiToolkitComponentInstanceConfig>();
 
             data.configVersion = PsdUiToolkitExportConfigData.CurrentConfigVersion;
             for (int i = 0; i < data.layers.Length; i++)
@@ -186,10 +184,6 @@ namespace PsdTools.UIToolKit
                 data.virtualGroups[i]?.Sanitize();
             for (int i = 0; i < data.buttons.Length; i++)
                 data.buttons[i]?.Sanitize();
-            for (int i = 0; i < data.componentDefinitions.Length; i++)
-                data.componentDefinitions[i]?.Sanitize();
-            for (int i = 0; i < data.componentInstances.Length; i++)
-                data.componentInstances[i]?.Sanitize();
             return data;
         }
 

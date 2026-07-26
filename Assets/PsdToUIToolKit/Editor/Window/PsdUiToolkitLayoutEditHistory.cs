@@ -16,10 +16,6 @@ namespace PsdTools.UIToolKit
                 Array.Empty<PsdUiToolkitVirtualGroupConfig>();
             public PsdUiToolkitButtonSemanticConfig[] buttons =
                 Array.Empty<PsdUiToolkitButtonSemanticConfig>();
-            public PsdUiToolkitComponentDefinitionConfig[] componentDefinitions =
-                Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
-            public PsdUiToolkitComponentInstanceConfig[] componentInstances =
-                Array.Empty<PsdUiToolkitComponentInstanceConfig>();
         }
 
         [Serializable]
@@ -119,8 +115,6 @@ namespace PsdTools.UIToolKit
                 layers = layerIntents,
                 virtualGroups = source.virtualGroups,
                 buttons = source.buttons,
-                componentDefinitions = source.componentDefinitions,
-                componentInstances = source.componentInstances,
             };
             return JsonUtility.ToJson(snapshot);
         }
@@ -155,10 +149,6 @@ namespace PsdTools.UIToolKit
             data.virtualGroups =
                 snapshot.virtualGroups ?? Array.Empty<PsdUiToolkitVirtualGroupConfig>();
             data.buttons = snapshot.buttons ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>();
-            data.componentDefinitions = snapshot.componentDefinitions
-                ?? Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
-            data.componentInstances = snapshot.componentInstances
-                ?? Array.Empty<PsdUiToolkitComponentInstanceConfig>();
             PsdUiToolkitConfigStore.MigrateToCurrentVersion(data);
         }
     }

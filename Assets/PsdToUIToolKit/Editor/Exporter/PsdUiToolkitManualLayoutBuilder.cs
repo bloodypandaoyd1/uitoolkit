@@ -120,36 +120,6 @@ namespace PsdTools.UIToolKit
                 }
             }
 
-            PsdUiToolkitComponentDefinitionConfig[] definitions =
-                configMap.GetComponentDefinitions();
-            HashSet<string> componentIds =
-                new HashSet<string>(StringComparer.Ordinal);
-            for (int i = 0; i < definitions.Length; i++)
-            {
-                PsdUiToolkitComponentDefinitionConfig definition =
-                    definitions[i];
-                if (definition == null
-                    || string.IsNullOrEmpty(definition.id)
-                    || !componentIds.Add(definition.id)
-                    || !nodes.ContainsKey(definition.root))
-                {
-                    PsdUiToolkitNodeReference root =
-                        definition?.root ?? default;
-                    AddWarning(
-                        warnings,
-                        diagnostics,
-                        "InvalidComponentDefinition",
-                        $"Component definition '{definition?.name ?? definition?.id ?? "Unnamed"}' has a missing root or duplicate ID and will be ignored.",
-                        definition != null
-                            && root.kind == PsdUiToolkitNodeReferenceKind.Layer
-                            ? root.layerId
-                            : -1,
-                        definition != null
-                            && root.kind == PsdUiToolkitNodeReferenceKind.VirtualGroup
-                            ? root.virtualGroupId
-                            : null);
-                }
-            }
         }
 
         private static void CollectNodes(

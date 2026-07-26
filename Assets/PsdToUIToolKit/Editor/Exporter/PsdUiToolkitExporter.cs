@@ -54,8 +54,6 @@ namespace PsdTools.UIToolKit
         public string EditableUxmlAssetPath { get; internal set; }
         public string GeneratedUssAssetPath { get; internal set; }
         public string EditableUssAssetPath { get; internal set; }
-        public PsdUiToolkitComponentExportArtifact[] ComponentArtifacts { get; internal set; } =
-            Array.Empty<PsdUiToolkitComponentExportArtifact>();
 
         public string UxmlAssetPath
         {
@@ -1519,16 +1517,13 @@ namespace PsdTools.UIToolKit
                 PsdUiToolkitRasterExporter rasterExporter = new PsdUiToolkitRasterExporter(psd, configMap, imageFolderAssetPath, autoImageNaming);
                 PsdUiToolkitRasterExportResult rasterResult = rasterExporter.ExportAll();
                 PsdUiToolkitLayoutTree layoutTree = PsdUiToolkitManualLayoutBuilder.Build(psd, configMap, rasterResult, psdName);
-                PsdUiToolkitComponentExportArtifact[] componentArtifacts =
-                    BuildComponentArtifacts(config, uxmlRoot);
                 PsdUiToolkitUxmlWriter.Write(
                     layoutTree,
                     configMap,
                     rasterResult,
                     fontMapping,
                     generatedUxmlAssetPath,
-                    generatedUssAssetPath,
-                    componentArtifacts);
+                    generatedUssAssetPath);
                 for (int i = 0; i < layoutTree.Warnings.Count; i++)
                     Debug.LogWarning($"[PsdUiToolkit] {layoutTree.Warnings[i]}");
                 DeleteStaleGeneratedImages(imageFolderAssetPath, rasterResult);
@@ -1541,71 +1536,12 @@ namespace PsdTools.UIToolKit
                     EditableUxmlAssetPath = editableUxmlAssetPath,
                     GeneratedUssAssetPath = generatedUssAssetPath,
                     EditableUssAssetPath = editableUssAssetPath,
-                    ComponentArtifacts = componentArtifacts,
                 };
             }
             finally
             {
                 psd?.ReleaseAllData();
             }
-        }
-
-        private static PsdUiToolkitComponentExportArtifact[] BuildComponentArtifacts(
-            PsdUiToolkitExportConfigData config,
-            string uxmlRoot)
-        {
-            PsdUiToolkitComponentDefinitionConfig[] definitions =
-                config?.componentDefinitions
-                ?? Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
-            string componentRoot =
-                PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, "Components");
-            PsdUiToolkitAssetPathUtility.EnsureAssetDirectoryExists(componentRoot);
-            List<PsdUiToolkitComponentExportArtifact> artifacts =
-                new List<PsdUiToolkitComponentExportArtifact>();
-            HashSet<string> componentIds =
-                new HashSet<string>(StringComparer.Ordinal);
-            for (int i = 0; i < definitions.Length; i++)
-            {
-                PsdUiToolkitComponentDefinitionConfig definition = definitions[i];
-                if (definition == null
-                    || string.IsNullOrEmpty(definition.id)
-                    || !definition.root.IsValid
-                    || !componentIds.Add(definition.id))
-                {
-                    continue;
-                }
-
-                string safeName = PsdUiToolkitAssetPathUtility.SanitizeFileName(
-                    string.IsNullOrWhiteSpace(definition.name)
-                        ? "Component"
-                        : definition.name);
-                string shortId = definition.id.Substring(
-                    0,
-                    Math.Min(8, definition.id.Length));
-                string stem = $"{safeName}_{shortId}";
-                artifacts.Add(new PsdUiToolkitComponentExportArtifact
-                {
-                    ComponentId = definition.id,
-                    Name = definition.name,
-                    GeneratedUxmlAssetPath =
-                        PsdUiToolkitAssetPathUtility.CombineAssetsPath(
-                            componentRoot,
-                            stem + ".generated.uxml"),
-                    GeneratedUssAssetPath =
-                        PsdUiToolkitAssetPathUtility.CombineAssetsPath(
-                            componentRoot,
-                            stem + ".generated.uss"),
-                    EditableUxmlAssetPath =
-                        PsdUiToolkitAssetPathUtility.CombineAssetsPath(
-                            componentRoot,
-                            stem + ".uxml"),
-                    EditableUssAssetPath =
-                        PsdUiToolkitAssetPathUtility.CombineAssetsPath(
-                            componentRoot,
-                            stem + ".uss"),
-                });
-            }
-            return artifacts.ToArray();
         }
 
         public static string CreateEditableCopy(
@@ -1638,7 +1574,7 @@ namespace PsdTools.UIToolKit
                     return editablePath;
                 }
                 throw new IOException(
-                    "An editable USS or component file already exists. No files were changed; explicitly recreate the complete editable asset family to continue.");
+                    "An editable UXML or USS file already exists. No files were changed; explicitly recreate the complete editable asset family to continue.");
             }
 
             foreach (KeyValuePair<string, string> pair in copyPlan)
@@ -1776,15 +1712,5 @@ namespace PsdTools.UIToolKit
                     ".generated.",
                     "."));
         }
-    }
-
-    public sealed class PsdUiToolkitComponentExportArtifact
-    {
-        public string ComponentId { get; internal set; }
-        public string Name { get; internal set; }
-        public string GeneratedUxmlAssetPath { get; internal set; }
-        public string GeneratedUssAssetPath { get; internal set; }
-        public string EditableUxmlAssetPath { get; internal set; }
-        public string EditableUssAssetPath { get; internal set; }
     }
 }

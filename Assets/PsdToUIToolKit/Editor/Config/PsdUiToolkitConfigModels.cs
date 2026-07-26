@@ -208,90 +208,6 @@ namespace PsdTools.UIToolKit
         }
     }
 
-    public enum PsdUiToolkitComponentAttributeKind
-    {
-        Text = 0,
-        Image = 1,
-    }
-
-    [Serializable]
-    public sealed class PsdUiToolkitComponentExposedElementConfig
-    {
-        public string elementName = "";
-        public PsdUiToolkitComponentAttributeKind kind;
-
-        public void Sanitize()
-        {
-            elementName ??= string.Empty;
-            if (!Enum.IsDefined(typeof(PsdUiToolkitComponentAttributeKind), kind))
-                kind = PsdUiToolkitComponentAttributeKind.Text;
-        }
-    }
-
-    [Serializable]
-    public sealed class PsdUiToolkitComponentDefinitionConfig
-    {
-        public string id = "";
-        public string name = "";
-        public PsdUiToolkitNodeReference root;
-        public bool hasContentContainer;
-        public PsdUiToolkitNodeReference contentContainer;
-        public PsdUiToolkitComponentExposedElementConfig[] exposedElements =
-            Array.Empty<PsdUiToolkitComponentExposedElementConfig>();
-
-        public void Sanitize()
-        {
-            id ??= string.Empty;
-            name ??= string.Empty;
-            root.Sanitize();
-            contentContainer.Sanitize();
-            exposedElements ??= Array.Empty<PsdUiToolkitComponentExposedElementConfig>();
-            for (int i = 0; i < exposedElements.Length; i++)
-                exposedElements[i]?.Sanitize();
-        }
-    }
-
-    [Serializable]
-    public sealed class PsdUiToolkitComponentAttributeOverrideConfig
-    {
-        public string elementName = "";
-        public PsdUiToolkitComponentAttributeKind kind;
-        public PsdUiToolkitNodeReference source;
-
-        public void Sanitize()
-        {
-            elementName ??= string.Empty;
-            if (!Enum.IsDefined(typeof(PsdUiToolkitComponentAttributeKind), kind))
-                kind = PsdUiToolkitComponentAttributeKind.Text;
-            source.Sanitize();
-        }
-    }
-
-    [Serializable]
-    public sealed class PsdUiToolkitComponentInstanceConfig
-    {
-        public PsdUiToolkitNodeReference owner;
-        public string componentId = "";
-        public string externalTemplateAssetGuid = "";
-        public PsdUiToolkitComponentAttributeOverrideConfig[] overrides =
-            Array.Empty<PsdUiToolkitComponentAttributeOverrideConfig>();
-        public PsdUiToolkitNodeReference[] contentMembers = Array.Empty<PsdUiToolkitNodeReference>();
-
-        public void Sanitize()
-        {
-            owner.Sanitize();
-            componentId ??= string.Empty;
-            externalTemplateAssetGuid ??= string.Empty;
-            if (!string.IsNullOrEmpty(componentId))
-                externalTemplateAssetGuid = string.Empty;
-            overrides ??= Array.Empty<PsdUiToolkitComponentAttributeOverrideConfig>();
-            contentMembers ??= Array.Empty<PsdUiToolkitNodeReference>();
-            for (int i = 0; i < overrides.Length; i++)
-                overrides[i]?.Sanitize();
-            contentMembers = PsdUiToolkitConfigSanitizer.SanitizeReferences(contentMembers);
-        }
-    }
-
     [Serializable]
     public struct PsdUiToolkitNineSliceParams
     {
@@ -441,10 +357,6 @@ namespace PsdTools.UIToolKit
         public PsdUiToolkitLayerConfig[] layers = Array.Empty<PsdUiToolkitLayerConfig>();
         public PsdUiToolkitVirtualGroupConfig[] virtualGroups = Array.Empty<PsdUiToolkitVirtualGroupConfig>();
         public PsdUiToolkitButtonSemanticConfig[] buttons = Array.Empty<PsdUiToolkitButtonSemanticConfig>();
-        public PsdUiToolkitComponentDefinitionConfig[] componentDefinitions =
-            Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
-        public PsdUiToolkitComponentInstanceConfig[] componentInstances =
-            Array.Empty<PsdUiToolkitComponentInstanceConfig>();
     }
 
     internal sealed class PsdUiToolkitLayerConfigMap
@@ -452,16 +364,12 @@ namespace PsdTools.UIToolKit
         private readonly Dictionary<int, PsdUiToolkitLayerConfig> _lookup;
         private readonly PsdUiToolkitVirtualGroupConfig[] _virtualGroups;
         private readonly PsdUiToolkitButtonSemanticConfig[] _buttons;
-        private readonly PsdUiToolkitComponentDefinitionConfig[] _componentDefinitions;
-        private readonly PsdUiToolkitComponentInstanceConfig[] _componentInstances;
 
         public PsdUiToolkitLayerConfigMap(PsdUiToolkitExportConfigData data)
         {
             _lookup = PsdUiToolkitConfigStore.BuildLookup(data);
             _virtualGroups = data?.virtualGroups ?? Array.Empty<PsdUiToolkitVirtualGroupConfig>();
             _buttons = data?.buttons ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>();
-            _componentDefinitions = data?.componentDefinitions ?? Array.Empty<PsdUiToolkitComponentDefinitionConfig>();
-            _componentInstances = data?.componentInstances ?? Array.Empty<PsdUiToolkitComponentInstanceConfig>();
         }
 
         public PsdUiToolkitLayerConfig Get(Layer layer)
@@ -520,8 +428,6 @@ namespace PsdTools.UIToolKit
 
         public PsdUiToolkitVirtualGroupConfig[] GetVirtualGroups() => _virtualGroups;
         public PsdUiToolkitButtonSemanticConfig[] GetButtons() => _buttons;
-        public PsdUiToolkitComponentDefinitionConfig[] GetComponentDefinitions() => _componentDefinitions;
-        public PsdUiToolkitComponentInstanceConfig[] GetComponentInstances() => _componentInstances;
     }
 
     internal static class PsdUiToolkitEditorPrefs
