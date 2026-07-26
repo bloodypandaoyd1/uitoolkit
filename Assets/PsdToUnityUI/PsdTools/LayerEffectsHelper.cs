@@ -7,7 +7,7 @@ namespace PsdTools
 {
     /// <summary>
     /// Shared layer-effect helpers: color overlay, gradient overlay, layer mask, solid fill.
-    /// Used by PsdImage (preview compositing) and PSDAutoPrefab (export slices).
+    /// Used by PsdImage (preview compositing) and the UI Toolkit raster exporter.
     /// </summary>
     public static class LayerEffectsHelper
     {
@@ -25,7 +25,7 @@ namespace PsdTools
         /// Builds the layer's processed texture (color overlay, gradient overlay, layer mask); not saved to disk.
         /// <para>Preview compositing (bakeLayerOpacity = false): do not bake LayerOpacity into alpha;
         /// the caller's blend loop applies opacity once to avoid double application.</para>
-        /// <para>Export slices (bakeLayerOpacity = true, same idea as PSDAutoPrefab.CreateLayerTexture):
+        /// <para>Raster export (bakeLayerOpacity = true):
         /// bake all opacity into alpha.</para>
         /// </summary>
         public static Texture2D CreateLayerTextureWithEffects(Layer layer, bool bakeLayerOpacity = false)
