@@ -24,7 +24,6 @@ namespace PsdTools.UIToolKit
     {
         FollowParent = 0,
         KeepAbsolute = 1,
-        Background = 2,
     }
 
     public enum PsdUiToolkitMainAxisDistribution
@@ -137,77 +136,6 @@ namespace PsdTools.UIToolKit
         }
     }
 
-    public enum PsdUiToolkitButtonVisualState
-    {
-        Normal = 0,
-        Hover = 1,
-        Pressed = 2,
-        Disabled = 3,
-        Focused = 4,
-    }
-
-    [Serializable]
-    public sealed class PsdUiToolkitButtonStateBinding
-    {
-        public PsdUiToolkitButtonVisualState state;
-        public PsdUiToolkitNodeReference source;
-
-        public void Sanitize()
-        {
-            if (!Enum.IsDefined(typeof(PsdUiToolkitButtonVisualState), state))
-                state = PsdUiToolkitButtonVisualState.Normal;
-            source.Sanitize();
-        }
-    }
-
-    [Serializable]
-    public sealed class PsdUiToolkitButtonSemanticConfig
-    {
-        public PsdUiToolkitNodeReference owner;
-        public PsdUiToolkitButtonStateBinding[] states = Array.Empty<PsdUiToolkitButtonStateBinding>();
-
-        public void Sanitize()
-        {
-            owner.Sanitize();
-            states ??= Array.Empty<PsdUiToolkitButtonStateBinding>();
-            HashSet<PsdUiToolkitButtonVisualState> seenStates = new HashSet<PsdUiToolkitButtonVisualState>();
-            HashSet<PsdUiToolkitNodeReference> seenSources = new HashSet<PsdUiToolkitNodeReference>();
-            List<PsdUiToolkitButtonStateBinding> valid = new List<PsdUiToolkitButtonStateBinding>();
-            for (int i = 0; i < states.Length; i++)
-            {
-                PsdUiToolkitButtonStateBinding binding = states[i];
-                if (binding == null)
-                    continue;
-                binding.Sanitize();
-                if (!binding.source.IsValid
-                    || !seenStates.Add(binding.state)
-                    || !seenSources.Add(binding.source))
-                {
-                    continue;
-                }
-
-                valid.Add(binding);
-            }
-
-            states = valid.ToArray();
-        }
-
-        public bool TryGetState(PsdUiToolkitButtonVisualState state, out PsdUiToolkitNodeReference source)
-        {
-            for (int i = 0; i < states.Length; i++)
-            {
-                if (states[i] != null && states[i].state == state)
-                {
-                    source = states[i].source;
-                    return true;
-                }
-            }
-
-            source = default;
-            return false;
-        }
-    }
-
     [Serializable]
     public struct PsdUiToolkitNineSliceParams
     {
@@ -299,7 +227,10 @@ namespace PsdTools.UIToolKit
             {
                 childrenLayout = PsdUiToolkitContainerLayout.Absolute;
             }
-            if (!Enum.IsDefined(typeof(PsdUiToolkitItemRole), itemRole))
+            // Config v4 serialized the removed Background role as 2.
+            if ((int)itemRole == 2)
+                itemRole = PsdUiToolkitItemRole.KeepAbsolute;
+            else if (!Enum.IsDefined(typeof(PsdUiToolkitItemRole), itemRole))
                 itemRole = PsdUiToolkitItemRole.FollowParent;
             if (!Enum.IsDefined(typeof(PsdUiToolkitMainAxisDistribution), mainAxisDistribution))
                 mainAxisDistribution = PsdUiToolkitMainAxisDistribution.PreservePsd;
@@ -356,20 +287,17 @@ namespace PsdTools.UIToolKit
         public int configVersion;
         public PsdUiToolkitLayerConfig[] layers = Array.Empty<PsdUiToolkitLayerConfig>();
         public PsdUiToolkitVirtualGroupConfig[] virtualGroups = Array.Empty<PsdUiToolkitVirtualGroupConfig>();
-        public PsdUiToolkitButtonSemanticConfig[] buttons = Array.Empty<PsdUiToolkitButtonSemanticConfig>();
     }
 
     internal sealed class PsdUiToolkitLayerConfigMap
     {
         private readonly Dictionary<int, PsdUiToolkitLayerConfig> _lookup;
         private readonly PsdUiToolkitVirtualGroupConfig[] _virtualGroups;
-        private readonly PsdUiToolkitButtonSemanticConfig[] _buttons;
 
         public PsdUiToolkitLayerConfigMap(PsdUiToolkitExportConfigData data)
         {
             _lookup = PsdUiToolkitConfigStore.BuildLookup(data);
             _virtualGroups = data?.virtualGroups ?? Array.Empty<PsdUiToolkitVirtualGroupConfig>();
-            _buttons = data?.buttons ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>();
         }
 
         public PsdUiToolkitLayerConfig Get(Layer layer)
@@ -427,7 +355,6 @@ namespace PsdTools.UIToolKit
         }
 
         public PsdUiToolkitVirtualGroupConfig[] GetVirtualGroups() => _virtualGroups;
-        public PsdUiToolkitButtonSemanticConfig[] GetButtons() => _buttons;
     }
 
     internal static class PsdUiToolkitEditorPrefs

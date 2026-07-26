@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Security;
@@ -11,32 +10,6 @@ namespace PsdTools.UIToolKit
 {
     internal static class PsdUiToolkitUxmlWriter
     {
-        private sealed class SemanticWriteContext
-        {
-            public readonly PsdUiToolkitLayoutTree LayoutTree;
-            public readonly Dictionary<PsdUiToolkitNodeReference, PsdUiToolkitButtonSemanticConfig> Buttons;
-            public readonly HashSet<PsdUiToolkitNodeReference> InvalidButtonOwners =
-                new HashSet<PsdUiToolkitNodeReference>();
-            public readonly HashSet<string> WrittenButtonRules =
-                new HashSet<string>(StringComparer.Ordinal);
-            public readonly StringBuilder Uss = new StringBuilder(2048);
-            public SemanticWriteContext(
-                PsdUiToolkitLayoutTree layoutTree,
-                PsdUiToolkitLayerConfigMap configMap)
-            {
-                LayoutTree = layoutTree;
-                Buttons = new Dictionary<PsdUiToolkitNodeReference, PsdUiToolkitButtonSemanticConfig>();
-
-                PsdUiToolkitButtonSemanticConfig[] buttons = configMap.GetButtons();
-                for (int i = 0; i < buttons.Length; i++)
-                {
-                    PsdUiToolkitButtonSemanticConfig button = buttons[i];
-                    if (button != null && button.owner.IsValid && !Buttons.ContainsKey(button.owner))
-                        Buttons.Add(button.owner, button);
-                }
-            }
-        }
-
         public static void Write(
             PsdUiToolkitLayoutTree layoutTree,
             PsdUiToolkitLayerConfigMap configMap,
@@ -52,9 +25,6 @@ namespace PsdTools.UIToolKit
             if (rasterResult == null)
                 throw new ArgumentNullException(nameof(rasterResult));
 
-            SemanticWriteContext pageContext = new SemanticWriteContext(
-                layoutTree,
-                configMap);
             StringBuilder pageBody = new StringBuilder(8192);
             pageBody.Append("  <ui:VisualElement");
             pageBody.Append($" name=\"{EscapeAttribute(layoutTree.RootName)}\"");
@@ -63,225 +33,19 @@ namespace PsdTools.UIToolKit
 
             foreach (PsdUiToolkitLayoutNode child in layoutTree.Children)
             {
-                AppendLayoutNode(pageBody, child, 2, 0, 0, configMap, rasterResult, fontMapping, PsdUiToolkitFlowChildPlacement.Absolute, pageContext);
+                AppendLayoutNode(pageBody, child, 2, 0, 0, configMap, rasterResult, fontMapping, PsdUiToolkitFlowChildPlacement.Absolute);
             }
 
             pageBody.AppendLine("  </ui:VisualElement>");
             StringBuilder builder = new StringBuilder(pageBody.Length + 1024);
-            AppendDocumentHeader(
-                builder,
-                outputUssAssetPath,
-                pageContext.Uss.Length > 0);
+            builder.AppendLine("<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">");
             builder.Append(pageBody);
             builder.AppendLine("</ui:UXML>");
 
             string diskPath = PsdUiToolkitAssetPathUtility.GetDiskPath(outputAssetPath);
             Directory.CreateDirectory(Path.GetDirectoryName(diskPath) ?? string.Empty);
             File.WriteAllText(diskPath, builder.ToString(), new UTF8Encoding(false));
-            WriteUss(outputUssAssetPath, pageContext.Uss);
-        }
-
-        private static void AppendDocumentHeader(
-            StringBuilder builder,
-            string ussAssetPath,
-            bool includeStyle)
-        {
-            builder.AppendLine("<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">");
-            if (includeStyle)
-            {
-                builder.AppendLine(
-                    $"  <ui:Style src=\"{EscapeAttribute(ToProjectUri(ussAssetPath))}\" />");
-            }
-        }
-
-        private static bool TryPrepareButton(
-            SemanticWriteContext context,
-            PsdUiToolkitLayoutNode node,
-            out string buttonClass)
-        {
-            buttonClass = string.Empty;
-            if (!context.Buttons.TryGetValue(
-                node.Reference,
-                out PsdUiToolkitButtonSemanticConfig button))
-            {
-                return false;
-            }
-            if (node.Children.Count == 0
-                || !button.TryGetState(
-                    PsdUiToolkitButtonVisualState.Normal,
-                    out PsdUiToolkitNodeReference normal)
-                || !IsDescendant(node, normal))
-            {
-                if (context.InvalidButtonOwners.Add(node.Reference))
-                {
-                    AddWarning(
-                        context.LayoutTree,
-                        $"Button '{node.DisplayName}' has no valid Normal state and was exported as a regular container.",
-                        node.Reference,
-                        "InvalidButtonNormalState");
-                }
-                return false;
-            }
-
-            string id = GetReferenceToken(node.Reference);
-            buttonClass = $"psd-button psd-button-{id}";
-            AppendButtonRules(context, button, id, node);
-            return true;
-        }
-
-        private static string GetButtonStateClasses(
-            SemanticWriteContext context,
-            PsdUiToolkitNodeReference reference)
-        {
-            List<string> classes = new List<string>();
-            foreach (KeyValuePair<PsdUiToolkitNodeReference, PsdUiToolkitButtonSemanticConfig> pair
-                in context.Buttons)
-            {
-                PsdUiToolkitButtonSemanticConfig button = pair.Value;
-                if (button == null)
-                    continue;
-                string id = GetReferenceToken(pair.Key);
-                for (int i = 0; i < button.states.Length; i++)
-                {
-                    PsdUiToolkitButtonStateBinding binding = button.states[i];
-                    if (binding != null && binding.source.Equals(reference))
-                    {
-                        classes.Add($"psd-state-{id}");
-                        classes.Add(
-                            $"psd-state-{id}-{binding.state.ToString().ToLowerInvariant()}");
-                    }
-                }
-            }
-            return string.Join(" ", classes);
-        }
-
-        private static void AppendButtonRules(
-            SemanticWriteContext context,
-            PsdUiToolkitButtonSemanticConfig button,
-            string id,
-            PsdUiToolkitLayoutNode owner)
-        {
-            if (!context.WrittenButtonRules.Add(id))
-                return;
-            string root = $".psd-button-{id}";
-            string state = $".psd-state-{id}";
-            context.Uss.AppendLine(
-                $"{root} {{ padding: 0; border-left-width: 0; border-top-width: 0; border-right-width: 0; border-bottom-width: 0; background-color: rgba(0, 0, 0, 0); }}");
-            context.Uss.AppendLine($"{root} {state} {{ display: none; }}");
-            AppendButtonStateRule(
-                context.Uss,
-                root,
-                state,
-                id,
-                string.Empty,
-                ResolveButtonState(
-                    button,
-                    PsdUiToolkitButtonVisualState.Normal,
-                    owner));
-            AppendButtonStateRule(
-                context.Uss,
-                root,
-                state,
-                id,
-                ":focus",
-                ResolveButtonState(
-                    button,
-                    PsdUiToolkitButtonVisualState.Focused,
-                    owner));
-            AppendButtonStateRule(
-                context.Uss,
-                root,
-                state,
-                id,
-                ":hover",
-                ResolveButtonState(
-                    button,
-                    PsdUiToolkitButtonVisualState.Hover,
-                    owner));
-            AppendButtonStateRule(
-                context.Uss,
-                root,
-                state,
-                id,
-                ":active",
-                ResolveButtonState(
-                    button,
-                    PsdUiToolkitButtonVisualState.Pressed,
-                    owner));
-            AppendButtonStateRule(
-                context.Uss,
-                root,
-                state,
-                id,
-                ":disabled",
-                ResolveButtonState(
-                    button,
-                    PsdUiToolkitButtonVisualState.Disabled,
-                    owner));
-        }
-
-        private static PsdUiToolkitButtonVisualState ResolveButtonState(
-            PsdUiToolkitButtonSemanticConfig button,
-            PsdUiToolkitButtonVisualState requested,
-            PsdUiToolkitLayoutNode owner)
-        {
-            return button.TryGetState(
-                    requested,
-                    out PsdUiToolkitNodeReference source)
-                && IsDescendant(owner, source)
-                ? requested
-                : PsdUiToolkitButtonVisualState.Normal;
-        }
-
-        private static void AppendButtonStateRule(
-            StringBuilder uss,
-            string root,
-            string stateClass,
-            string id,
-            string pseudo,
-            PsdUiToolkitButtonVisualState visibleState)
-        {
-            if (!string.IsNullOrEmpty(pseudo))
-                uss.AppendLine($"{root}{pseudo} {stateClass} {{ display: none; }}");
-            uss.AppendLine(
-                $"{root}{pseudo} .psd-state-{id}-{visibleState.ToString().ToLowerInvariant()} {{ display: flex; }}");
-        }
-
-        private static bool IsDescendant(
-            PsdUiToolkitLayoutNode root,
-            PsdUiToolkitNodeReference sought)
-        {
-            for (int i = 0; i < root.Children.Count; i++)
-            {
-                PsdUiToolkitLayoutNode child = root.Children[i];
-                if (child.Reference.Equals(sought) || IsDescendant(child, sought))
-                    return true;
-            }
-            return false;
-        }
-
-        private static string JoinClasses(string first, string second)
-        {
-            if (string.IsNullOrEmpty(first))
-                return second ?? string.Empty;
-            if (string.IsNullOrEmpty(second))
-                return first;
-            return first + " " + second;
-        }
-
-        private static string GetReferenceToken(PsdUiToolkitNodeReference reference)
-        {
-            if (reference.kind == PsdUiToolkitNodeReferenceKind.Layer)
-                return $"l{Math.Max(0, reference.layerId)}";
-            string id = reference.virtualGroupId ?? string.Empty;
-            return "g" + id.Substring(0, Math.Min(10, id.Length));
-        }
-
-        private static string ToProjectUri(string assetPath)
-        {
-            string normalized =
-                PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(assetPath);
-            return "project:/" + normalized;
+            WriteUss(outputUssAssetPath);
         }
 
         private static void WriteTextAsset(string assetPath, string text)
@@ -291,39 +55,9 @@ namespace PsdTools.UIToolKit
             File.WriteAllText(diskPath, text ?? string.Empty, new UTF8Encoding(false));
         }
 
-        private static void WriteUss(string assetPath, StringBuilder uss)
+        private static void WriteUss(string assetPath)
         {
-            WriteTextAsset(
-                assetPath,
-                uss == null || uss.Length == 0
-                    ? "/* Generated by PSDToUIToolKit. */\n"
-                    : "/* Generated by PSDToUIToolKit. */\n" + uss);
-        }
-
-        private static void AddWarning(
-            PsdUiToolkitLayoutTree tree,
-            string message,
-            PsdUiToolkitNodeReference reference = default,
-            string code = "SemanticWarning")
-        {
-            if (tree == null
-                || string.IsNullOrEmpty(message)
-                || tree.Warnings.Contains(message))
-            {
-                return;
-            }
-            tree.Warnings.Add(message);
-            if (!reference.IsValid)
-                return;
-            tree.Diagnostics.Add(new PsdUiToolkitLayoutDiagnostic(
-                code,
-                message,
-                reference.kind == PsdUiToolkitNodeReferenceKind.Layer
-                    ? reference.layerId
-                    : -1,
-                reference.kind == PsdUiToolkitNodeReferenceKind.VirtualGroup
-                    ? reference.virtualGroupId
-                    : string.Empty));
+            WriteTextAsset(assetPath, "/* Generated by PSDToUIToolKit. */\n");
         }
 
         private static void AppendLayoutNode(
@@ -335,8 +69,7 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitLayerConfigMap configMap,
             PsdUiToolkitRasterExportResult rasterResult,
             PsdUiToolkitFontMappingLookup fontMapping,
-            PsdUiToolkitFlowChildPlacement placement,
-            SemanticWriteContext semanticContext)
+            PsdUiToolkitFlowChildPlacement placement)
         {
             if (node == null)
                 return;
@@ -362,16 +95,6 @@ namespace PsdTools.UIToolKit
                 : (string.IsNullOrEmpty(layer.Name) ? $"Layer_{layer.LayerId.Value}" : layer.Name);
             PsdUiToolkitFlowContainerPlan flowPlan = PsdUiToolkitFlowLayoutResolver.Resolve(node, configMap);
 
-            string stateClasses = GetButtonStateClasses(semanticContext, node.Reference);
-            bool omitInlineDisplay = !string.IsNullOrEmpty(stateClasses);
-            bool isButton = TryPrepareButton(
-                semanticContext,
-                node,
-                out string buttonClass);
-            string classes = JoinClasses(buttonClass, stateClasses);
-            string classAttribute = string.IsNullOrEmpty(classes)
-                ? string.Empty
-                : $" class=\"{EscapeAttribute(classes)}\"";
             string style = BuildStyle(
                 node,
                 layer,
@@ -382,8 +105,7 @@ namespace PsdTools.UIToolKit
                 rasterInfo,
                 fontMapping,
                 placement,
-                flowPlan,
-                omitInlineDisplay);
+                flowPlan);
 
             if (!isSynthetic && layer.Kind == LayerKind.Type)
             {
@@ -428,7 +150,7 @@ namespace PsdTools.UIToolKit
                     : "";
 
                 builder.Append(indent);
-                builder.Append($"<ui:Label name=\"{EscapeAttribute(elementName)}\" text=\"{EscapeAttribute(rawText)}\"{richTextAttr}{classAttribute} style=\"{EscapeAttribute(style)}\" />");
+                builder.Append($"<ui:Label name=\"{EscapeAttribute(elementName)}\" text=\"{EscapeAttribute(rawText)}\"{richTextAttr} style=\"{EscapeAttribute(style)}\" />");
                 builder.AppendLine();
                 return;
             }
@@ -436,79 +158,34 @@ namespace PsdTools.UIToolKit
             if (!hasChildren)
             {
                 builder.Append(indent);
-                builder.Append($"<ui:VisualElement name=\"{EscapeAttribute(elementName)}\"{classAttribute} style=\"{EscapeAttribute(style)}\" />");
+                builder.Append($"<ui:VisualElement name=\"{EscapeAttribute(elementName)}\" style=\"{EscapeAttribute(style)}\" />");
                 builder.AppendLine();
                 return;
             }
 
             builder.Append(indent);
-            string containerTag = isButton ? "Button" : "VisualElement";
-            string buttonTextAttribute = isButton ? " text=\"\" focusable=\"true\"" : string.Empty;
-            builder.Append($"<ui:{containerTag} name=\"{EscapeAttribute(elementName)}\"{buttonTextAttribute}{classAttribute} style=\"{EscapeAttribute(style)}\"");
+            builder.Append($"<ui:VisualElement name=\"{EscapeAttribute(elementName)}\" style=\"{EscapeAttribute(style)}\"");
             builder.AppendLine(" >");
 
-            List<PsdUiToolkitLayoutNode> outputChildren =
-                GetOutputChildren(node, isButton, semanticContext);
             if (flowPlan.UseFlow)
             {
-                for (int i = 0; i < outputChildren.Count; i++)
+                for (int i = 0; i < node.Children.Count; i++)
                 {
-                    PsdUiToolkitLayoutNode child = outputChildren[i];
+                    PsdUiToolkitLayoutNode child = node.Children[i];
                     PsdUiToolkitFlowChildPlacement childPlacement = flowPlan.Placements.TryGetValue(child, out PsdUiToolkitFlowChildPlacement resolvedPlacement)
                         ? resolvedPlacement
                         : PsdUiToolkitFlowChildPlacement.Absolute;
-                    AppendLayoutNode(builder, child, indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, childPlacement, semanticContext);
+                    AppendLayoutNode(builder, child, indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, childPlacement);
                 }
             }
             else
             {
-                for (int i = 0; i < outputChildren.Count; i++)
-                    AppendLayoutNode(builder, outputChildren[i], indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, PsdUiToolkitFlowChildPlacement.Absolute, semanticContext);
+                for (int i = 0; i < node.Children.Count; i++)
+                    AppendLayoutNode(builder, node.Children[i], indentLevel + 1, bounds.Left, bounds.Top, configMap, rasterResult, fontMapping, PsdUiToolkitFlowChildPlacement.Absolute);
             }
 
             builder.Append(indent);
-            builder.AppendLine($"</ui:{containerTag}>");
-        }
-
-        private static List<PsdUiToolkitLayoutNode> GetOutputChildren(
-            PsdUiToolkitLayoutNode node,
-            bool isButton,
-            SemanticWriteContext context)
-        {
-            if (!isButton
-                || !context.Buttons.TryGetValue(
-                    node.Reference,
-                    out PsdUiToolkitButtonSemanticConfig button))
-            {
-                return node.Children;
-            }
-
-            List<PsdUiToolkitLayoutNode> stateBranches =
-                new List<PsdUiToolkitLayoutNode>();
-            List<PsdUiToolkitLayoutNode> commonBranches =
-                new List<PsdUiToolkitLayoutNode>();
-            for (int i = 0; i < node.Children.Count; i++)
-            {
-                PsdUiToolkitLayoutNode child = node.Children[i];
-                bool containsState = false;
-                for (int stateIndex = 0;
-                    stateIndex < button.states.Length;
-                    stateIndex++)
-                {
-                    PsdUiToolkitButtonStateBinding binding =
-                        button.states[stateIndex];
-                    if (binding != null
-                        && (child.Reference.Equals(binding.source)
-                            || IsDescendant(child, binding.source)))
-                    {
-                        containsState = true;
-                        break;
-                    }
-                }
-                (containsState ? stateBranches : commonBranches).Add(child);
-            }
-            stateBranches.AddRange(commonBranches);
-            return stateBranches;
+            builder.AppendLine("</ui:VisualElement>");
         }
 
         private static string BuildStyle(
@@ -521,8 +198,7 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitRasterAssetInfo rasterInfo,
             PsdUiToolkitFontMappingLookup fontMapping,
             PsdUiToolkitFlowChildPlacement placement,
-            PsdUiToolkitFlowContainerPlan flowPlan,
-            bool omitDisplay)
+            PsdUiToolkitFlowContainerPlan flowPlan)
         {
             StringBuilder style = new StringBuilder(256);
             if (placement.UseFlow)
@@ -544,14 +220,12 @@ namespace PsdTools.UIToolKit
             if (layer != null)
             {
                 style.AppendFormat(CultureInfo.InvariantCulture, " opacity: {0:0.###};", layer.OpacityFloat);
-                if (!omitDisplay)
-                    style.Append(configMap.IsVisible(layer) ? " display: flex;" : " display: none;");
+                style.Append(configMap.IsVisible(layer) ? " display: flex;" : " display: none;");
             }
             else
             {
                 style.Append(" opacity: 1;");
-                if (!omitDisplay)
-                    style.Append(" display: flex;");
+                style.Append(" display: flex;");
             }
 
             AppendFlowContainerStyle(style, flowPlan);

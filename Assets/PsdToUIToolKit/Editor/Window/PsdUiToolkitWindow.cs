@@ -14,8 +14,8 @@ namespace PsdTools.UIToolKit
     {
         private enum CanvasPreviewMode
         {
-            Psd,
             Layout,
+            Psd,
             Split,
         }
 
@@ -53,7 +53,7 @@ namespace PsdTools.UIToolKit
         private readonly Dictionary<PsdUiToolkitNodeReference, Vector2>
             _layoutPreviewSizeOverrides =
                 new Dictionary<PsdUiToolkitNodeReference, Vector2>();
-        private CanvasPreviewMode _canvasPreviewMode = CanvasPreviewMode.Psd;
+        private CanvasPreviewMode _canvasPreviewMode = CanvasPreviewMode.Layout;
         private ToolbarButton _psdPreviewButton;
         private ToolbarButton _layoutPreviewButton;
         private ToolbarButton _splitPreviewButton;
@@ -62,8 +62,6 @@ namespace PsdTools.UIToolKit
         private Toggle _autoImageNamingToggle;
         private ToolbarButton _undoButton;
         private ToolbarButton _redoButton;
-        private PsdUiToolkitButtonVisualState _previewButtonState =
-            PsdUiToolkitButtonVisualState.Normal;
         private PsdUiToolkitNodeReference _dragCandidateReference;
         private Vector2 _dragCandidateStart;
         private bool _dragCandidateArmed;
@@ -82,7 +80,6 @@ namespace PsdTools.UIToolKit
         {
             "Follow parent layout",
             "Keep original position",
-            "Use as background",
         };
         private static readonly string[] ContainerLayoutChoices =
         {
@@ -194,20 +191,20 @@ namespace PsdTools.UIToolKit
             centerPanel.Add(_canvasTitleLabel);
 
             Toolbar previewToolbar = new Toolbar();
-            _psdPreviewButton = new ToolbarButton(() => SetCanvasPreviewMode(CanvasPreviewMode.Psd))
-            {
-                text = "PSD",
-            };
             _layoutPreviewButton = new ToolbarButton(() => SetCanvasPreviewMode(CanvasPreviewMode.Layout))
             {
                 text = "Layout",
+            };
+            _psdPreviewButton = new ToolbarButton(() => SetCanvasPreviewMode(CanvasPreviewMode.Psd))
+            {
+                text = "PSD",
             };
             _splitPreviewButton = new ToolbarButton(() => SetCanvasPreviewMode(CanvasPreviewMode.Split))
             {
                 text = "Split",
             };
-            previewToolbar.Add(_psdPreviewButton);
             previewToolbar.Add(_layoutPreviewButton);
+            previewToolbar.Add(_psdPreviewButton);
             previewToolbar.Add(_splitPreviewButton);
             previewToolbar.style.marginTop = 4f;
             centerPanel.Add(previewToolbar);
@@ -347,7 +344,6 @@ namespace PsdTools.UIToolKit
                 if (_selectedLayer != null)
                     _selectedLayers.Add(_selectedLayer);
                 _selectedVirtualGroup = null;
-                _previewButtonState = PsdUiToolkitButtonVisualState.Normal;
                 _canvasShowSelection = _selectedLayer != null;
                 _canvasClickCandidates.Clear();
                 RefreshCompositePreview();
@@ -370,7 +366,6 @@ namespace PsdTools.UIToolKit
             _selectedLayer = null;
             _selectedLayers.Clear();
             _selectedVirtualGroup = null;
-            _previewButtonState = PsdUiToolkitButtonVisualState.Normal;
             _currentLayoutTree = null;
             _layoutPreviewSizeOverrides.Clear();
             _layoutHistory.Clear();
@@ -489,9 +484,9 @@ namespace PsdTools.UIToolKit
                             : "Group")
                         : node.SourceLayer.Kind.ToString()));
             string warningMarker = NodeHasWarning(node, nodeName) ? " [!]" : string.Empty;
-            string roleMarker = node.ItemRole == PsdUiToolkitItemRole.Background
-                ? " [BG]"
-                : (node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute ? " [FLOAT]" : string.Empty);
+            string roleMarker = node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute
+                ? " [FLOAT]"
+                : string.Empty;
             string layoutMarker = node.LayoutType == PsdUiToolkitLayoutType.Row
                 ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "[ROW/WRAP] " : "[ROW] ")
                 : (node.LayoutType == PsdUiToolkitLayoutType.Column
@@ -1057,8 +1052,6 @@ namespace PsdTools.UIToolKit
             }
 
             AddManualLayoutInspectorSection(config);
-            if (_selectedLayer.LayerId.HasValue)
-                AddSemanticInspector(PsdUiToolkitNodeReference.Layer(_selectedLayer.LayerId.Value));
             AddExportSettingsSection();
         }
 
@@ -1164,170 +1157,6 @@ namespace PsdTools.UIToolKit
                 lines => ApplyLayoutMutation(() => config.multiLineDistribution = lines));
         }
 
-        private void AddSemanticInspector(PsdUiToolkitNodeReference owner)
-        {
-            PsdUiToolkitLayoutNode ownerNode = FindLayoutNode(owner);
-            if (ownerNode == null)
-                return;
-
-            PsdUiToolkitExportConfigData data = EnsureConfigData();
-            PsdUiToolkitButtonSemanticConfig button = FindButton(owner);
-
-            _inspectorScroll.Add(new Label("Control Semantics")
-            {
-                style =
-                {
-                    unityFontStyleAndWeight = FontStyle.Bold,
-                    marginTop = 12f,
-                },
-            });
-
-            Toggle buttonToggle = new Toggle("Button")
-            {
-                value = button != null,
-            };
-            buttonToggle.SetEnabled(ownerNode.Children.Count > 0 || button != null);
-            buttonToggle.RegisterValueChangedCallback(evt =>
-            {
-                ApplyLayoutMutation(() =>
-                {
-                    List<PsdUiToolkitButtonSemanticConfig> buttons =
-                        new List<PsdUiToolkitButtonSemanticConfig>(
-                            data.buttons ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>());
-                    buttons.RemoveAll(item => item != null && item.owner.Equals(owner));
-                    if (evt.newValue)
-                    {
-                        buttons.Add(new PsdUiToolkitButtonSemanticConfig
-                        {
-                            owner = owner,
-                            states = Array.Empty<PsdUiToolkitButtonStateBinding>(),
-                        });
-                    }
-                    data.buttons = buttons.ToArray();
-                });
-            });
-            _inspectorScroll.Add(buttonToggle);
-            if (ownerNode.Children.Count == 0 && button == null)
-            {
-                _inspectorScroll.Add(new HelpBox(
-                    "Button semantics require a container with descendant visuals.",
-                    HelpBoxMessageType.Info));
-            }
-
-            if (button != null)
-            {
-                List<PsdUiToolkitLayoutNode> descendants =
-                    CollectLayoutDescendants(ownerNode);
-                for (int stateIndex = 0;
-                    stateIndex < Enum.GetValues(typeof(PsdUiToolkitButtonVisualState)).Length;
-                    stateIndex++)
-                {
-                    AddButtonStateField(
-                        button,
-                        (PsdUiToolkitButtonVisualState)stateIndex,
-                        descendants);
-                }
-
-                DropdownField previewState = new DropdownField(
-                    "Preview state",
-                    new List<string>
-                    {
-                        "Normal",
-                        "Hover",
-                        "Pressed",
-                        "Disabled",
-                        "Focused",
-                    },
-                    (int)_previewButtonState);
-                previewState.RegisterValueChangedCallback(evt =>
-                {
-                    _previewButtonState =
-                        (PsdUiToolkitButtonVisualState)previewState.choices.IndexOf(
-                            evt.newValue);
-                    RebuildLayoutPreview();
-                });
-                _inspectorScroll.Add(previewState);
-                if (!button.TryGetState(
-                    PsdUiToolkitButtonVisualState.Normal,
-                    out _))
-                {
-                    _inspectorScroll.Add(new HelpBox(
-                        "Normal is required. Until it is assigned this node exports as a regular container.",
-                        HelpBoxMessageType.Warning));
-                }
-            }
-
-        }
-
-        private void AddButtonStateField(
-            PsdUiToolkitButtonSemanticConfig button,
-            PsdUiToolkitButtonVisualState state,
-            List<PsdUiToolkitLayoutNode> descendants)
-        {
-            List<string> choices = new List<string> { "None" };
-            List<PsdUiToolkitNodeReference> references =
-                new List<PsdUiToolkitNodeReference> { default };
-            int selectedIndex = 0;
-            button.TryGetState(state, out PsdUiToolkitNodeReference selected);
-            for (int i = 0; i < descendants.Count; i++)
-            {
-                PsdUiToolkitLayoutNode node = descendants[i];
-                if (!node.Reference.IsValid)
-                    continue;
-                choices.Add(GetReferenceDisplayName(node.Reference));
-                references.Add(node.Reference);
-                if (node.Reference.Equals(selected))
-                    selectedIndex = choices.Count - 1;
-            }
-
-            DropdownField field = new DropdownField(
-                state.ToString(),
-                choices,
-                selectedIndex);
-            field.RegisterValueChangedCallback(evt =>
-            {
-                int index = field.choices.IndexOf(evt.newValue);
-                PsdUiToolkitNodeReference next = index <= 0
-                    ? default
-                    : references[index];
-                ApplyLayoutMutation(() =>
-                {
-                    List<PsdUiToolkitButtonStateBinding> states =
-                        new List<PsdUiToolkitButtonStateBinding>(
-                            button.states
-                            ?? Array.Empty<PsdUiToolkitButtonStateBinding>());
-                    states.RemoveAll(item =>
-                        item == null
-                        || item.state == state
-                        || (next.IsValid && item.source.Equals(next)));
-                    if (next.IsValid)
-                    {
-                        states.Add(new PsdUiToolkitButtonStateBinding
-                        {
-                            state = state,
-                            source = next,
-                        });
-                    }
-                    button.states = states.ToArray();
-                });
-            });
-            _inspectorScroll.Add(field);
-        }
-
-        private PsdUiToolkitButtonSemanticConfig FindButton(
-            PsdUiToolkitNodeReference owner)
-        {
-            PsdUiToolkitButtonSemanticConfig[] buttons =
-                EnsureConfigData().buttons
-                ?? Array.Empty<PsdUiToolkitButtonSemanticConfig>();
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                if (buttons[i] != null && buttons[i].owner.Equals(owner))
-                    return buttons[i];
-            }
-            return null;
-        }
-
         private PsdUiToolkitLayoutNode FindLayoutNode(
             PsdUiToolkitNodeReference reference)
         {
@@ -1353,30 +1182,6 @@ namespace PsdTools.UIToolKit
                     return nested;
             }
             return null;
-        }
-
-        private static List<PsdUiToolkitLayoutNode> CollectLayoutDescendants(
-            PsdUiToolkitLayoutNode root)
-        {
-            List<PsdUiToolkitLayoutNode> result =
-                new List<PsdUiToolkitLayoutNode>();
-            CollectLayoutDescendantsRecursive(root, result);
-            return result;
-        }
-
-        private static void CollectLayoutDescendantsRecursive(
-            PsdUiToolkitLayoutNode root,
-            List<PsdUiToolkitLayoutNode> result)
-        {
-            if (root == null)
-                return;
-            for (int i = 0; i < root.Children.Count; i++)
-            {
-                PsdUiToolkitLayoutNode child = root.Children[i];
-                if (child.Reference.IsValid)
-                    result.Add(child);
-                CollectLayoutDescendantsRecursive(child, result);
-            }
         }
 
         private string GetReferenceDisplayName(PsdUiToolkitNodeReference reference)
@@ -1794,8 +1599,6 @@ namespace PsdTools.UIToolKit
                 };
                 _inspectorScroll.Add(moveButton);
             }
-
-            AddSemanticInspector(PsdUiToolkitNodeReference.VirtualGroup(group.id));
 
             Button dissolveButton = new Button(() => DissolveVirtualGroup(group))
             {
@@ -2645,9 +2448,6 @@ namespace PsdTools.UIToolKit
                     ? DisplayStyle.Flex
                     : DisplayStyle.None;
             }
-            if (!ShouldShowButtonPreviewNode(node.Reference))
-                element.style.display = DisplayStyle.None;
-
             PsdUiToolkitFlowContainerPlan flowPlan =
                 PsdUiToolkitFlowLayoutResolver.Resolve(node, _configMap);
             ApplyLayoutPreviewContainerStyle(element, flowPlan, scale);
@@ -2758,52 +2558,6 @@ namespace PsdTools.UIToolKit
                 evt.StopPropagation();
             });
             container.Add(handle);
-        }
-
-        private bool ShouldShowButtonPreviewNode(
-            PsdUiToolkitNodeReference reference)
-        {
-            if (!reference.IsValid || _configData?.buttons == null)
-                return true;
-
-            for (int buttonIndex = 0;
-                buttonIndex < _configData.buttons.Length;
-                buttonIndex++)
-            {
-                PsdUiToolkitButtonSemanticConfig button =
-                    _configData.buttons[buttonIndex];
-                if (button == null || button.states == null)
-                    continue;
-
-                bool isBoundState = false;
-                for (int stateIndex = 0;
-                    stateIndex < button.states.Length;
-                    stateIndex++)
-                {
-                    PsdUiToolkitButtonStateBinding binding =
-                        button.states[stateIndex];
-                    if (binding != null && binding.source.Equals(reference))
-                    {
-                        isBoundState = true;
-                        break;
-                    }
-                }
-                if (!isBoundState)
-                    continue;
-
-                if (!button.TryGetState(
-                    _previewButtonState,
-                    out PsdUiToolkitNodeReference active)
-                    && !button.TryGetState(
-                        PsdUiToolkitButtonVisualState.Normal,
-                        out active))
-                {
-                    return false;
-                }
-                return active.Equals(reference);
-            }
-
-            return true;
         }
 
         private static void ApplyLayoutPreviewContainerStyle(
@@ -3016,9 +2770,9 @@ namespace PsdTools.UIToolKit
             VisualElement element,
             PsdUiToolkitLayoutNode node)
         {
-            string text = node.ItemRole == PsdUiToolkitItemRole.Background
-                ? "BG"
-                : (node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute ? "FLOAT" : string.Empty);
+            string text = node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute
+                ? "FLOAT"
+                : string.Empty;
             if (string.IsNullOrEmpty(text))
                 return;
 

@@ -1,11 +1,9 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using PsdTools.Layers;
 using PsdTools.Psd;
 using UnityEditor;
-using UnityEngine.UIElements;
 
 namespace PsdTools.UIToolKit.Tests
 {
@@ -66,7 +64,7 @@ namespace PsdTools.UIToolKit.Tests
                 Is.EqualTo(PsdUiToolkitContainerLayout.Row));
             Assert.That(
                 data.layers[0].itemRole,
-                Is.EqualTo(PsdUiToolkitItemRole.Background));
+                Is.EqualTo(PsdUiToolkitItemRole.KeepAbsolute));
             Assert.That(
                 data.layers[0].mainAxisDistribution,
                 Is.EqualTo(PsdUiToolkitMainAxisDistribution.End));
@@ -145,6 +143,45 @@ namespace PsdTools.UIToolKit.Tests
             Assert.That(
                 layer.multiLineDistribution,
                 Is.EqualTo(PsdUiToolkitMultiLineDistribution.PreservePsd));
+        }
+
+        [Test]
+        public void OrderChildrenForFlow_PreservesAbsolutePsdSlots()
+        {
+            PsdUiToolkitLayoutNode background = CreateRoleLeaf(
+                "Background",
+                0,
+                PsdUiToolkitItemRole.KeepAbsolute);
+            PsdUiToolkitLayoutNode right = CreateRoleLeaf(
+                "Right",
+                50,
+                PsdUiToolkitItemRole.FollowParent);
+            PsdUiToolkitLayoutNode left = CreateRoleLeaf(
+                "Left",
+                10,
+                PsdUiToolkitItemRole.FollowParent);
+            PsdUiToolkitLayoutNode overlay = CreateRoleLeaf(
+                "Overlay",
+                0,
+                PsdUiToolkitItemRole.KeepAbsolute);
+            List<PsdUiToolkitLayoutNode> children =
+                new List<PsdUiToolkitLayoutNode>
+                {
+                    background,
+                    right,
+                    left,
+                    overlay,
+                };
+
+            PsdUiToolkitManualLayoutBuilder.OrderChildrenForFlow(
+                children,
+                PsdUiToolkitLayoutType.Row,
+                PsdUiToolkitWrapMode.NoWrap);
+
+            Assert.That(children[0], Is.SameAs(background));
+            Assert.That(children[1], Is.SameAs(left));
+            Assert.That(children[2], Is.SameAs(right));
+            Assert.That(children[3], Is.SameAs(overlay));
         }
 
         [Test]
@@ -331,73 +368,7 @@ namespace PsdTools.UIToolKit.Tests
         }
 
         [Test]
-        public void ButtonWriter_UsesStandardButtonAndOrderedPseudoStates()
-        {
-            PsdUiToolkitLayoutNode normal = CreateVirtualLeaf(
-                "normal",
-                0,
-                0,
-                40,
-                20,
-                0);
-            PsdUiToolkitLayoutNode hover = CreateVirtualLeaf(
-                "hover",
-                0,
-                0,
-                40,
-                20,
-                1);
-            PsdUiToolkitLayoutNode buttonRoot = CreateVirtualContainer(
-                "button",
-                normal,
-                hover);
-            PsdUiToolkitExportConfigData data =
-                new PsdUiToolkitExportConfigData
-                {
-                    buttons = new[]
-                    {
-                        new PsdUiToolkitButtonSemanticConfig
-                        {
-                            owner = buttonRoot.Reference,
-                            states = new[]
-                            {
-                                new PsdUiToolkitButtonStateBinding
-                                {
-                                    state = PsdUiToolkitButtonVisualState.Normal,
-                                    source = normal.Reference,
-                                },
-                                new PsdUiToolkitButtonStateBinding
-                                {
-                                    state = PsdUiToolkitButtonVisualState.Hover,
-                                    source = hover.Reference,
-                                },
-                            },
-                        },
-                    },
-                };
-            WriteLayout(
-                "Button",
-                new[] { buttonRoot },
-                data,
-                out string uxml,
-                out string uss);
-
-            Assert.That(uxml, Does.Contain("<ui:Button"));
-            Assert.That(uss, Does.Contain(":hover"));
-            Assert.That(uss, Does.Contain(":active"));
-            Assert.That(uss, Does.Contain(":disabled"));
-            Assert.That(
-                uss.IndexOf(":disabled", StringComparison.Ordinal),
-                Is.GreaterThan(uss.IndexOf(":active", StringComparison.Ordinal)));
-            AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-            Assert.That(
-                AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
-                    GeneratedTestRoot + "/Button.generated.uxml"),
-                Is.Not.Null);
-        }
-
-        [Test]
-        public void Writer_WithoutV4Semantics_KeepsLegacyUxmlShape()
+        public void Writer_KeepsLegacyUxmlShape()
         {
             WriteLayout(
                 "Legacy",
@@ -413,7 +384,7 @@ namespace PsdTools.UIToolKit.Tests
         }
 
         [Test]
-        public void LayoutHistory_RestoresSemanticsWithoutTouchingExportFields()
+        public void LayoutHistory_RestoresLayoutWithoutTouchingExportFields()
         {
             PsdUiToolkitLayerConfig layer = new PsdUiToolkitLayerConfig
             {
@@ -430,13 +401,6 @@ namespace PsdTools.UIToolKit.Tests
                 new PsdUiToolkitLayoutEditHistory();
             history.Reset(data);
             layer.childrenLayout = PsdUiToolkitContainerLayout.Row;
-            data.buttons = new[]
-            {
-                new PsdUiToolkitButtonSemanticConfig
-                {
-                    owner = PsdUiToolkitNodeReference.Layer(10),
-                },
-            };
             history.Record(data);
             layer.exported = false;
 
@@ -444,13 +408,11 @@ namespace PsdTools.UIToolKit.Tests
             Assert.That(
                 layer.childrenLayout,
                 Is.EqualTo(PsdUiToolkitContainerLayout.Absolute));
-            Assert.That(data.buttons, Is.Empty);
             Assert.That(layer.exported, Is.False);
             Assert.That(history.Redo(data), Is.True);
             Assert.That(
                 layer.childrenLayout,
                 Is.EqualTo(PsdUiToolkitContainerLayout.Row));
-            Assert.That(data.buttons, Has.Length.EqualTo(1));
             Assert.That(layer.exported, Is.False);
         }
 
@@ -524,20 +486,21 @@ namespace PsdTools.UIToolKit.Tests
                 virtualGroupId: id);
         }
 
-        private static PsdUiToolkitLayoutNode CreateVirtualContainer(
-            string id,
-            params PsdUiToolkitLayoutNode[] children)
+        private static PsdUiToolkitLayoutNode CreateRoleLeaf(
+            string name,
+            int left,
+            PsdUiToolkitItemRole itemRole)
         {
             return new PsdUiToolkitLayoutNode(
                 null,
-                new PsdUiToolkitLayerBounds(0, 0, 100, 40),
-                false,
+                new PsdUiToolkitLayerBounds(left, 0, 20, 10),
+                true,
                 PsdUiToolkitLayoutType.Absolute,
                 0,
-                new List<PsdUiToolkitLayoutNode>(children),
-                id,
-                true,
-                virtualGroupId: id);
+                new List<PsdUiToolkitLayoutNode>(),
+                name,
+                false,
+                itemRole);
         }
 
         private static PsdUiToolkitLayoutNode CreateContainer(

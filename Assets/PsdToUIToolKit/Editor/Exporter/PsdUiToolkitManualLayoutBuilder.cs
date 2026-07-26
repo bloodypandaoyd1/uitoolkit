@@ -49,12 +49,6 @@ namespace PsdTools.UIToolKit
                 warnings,
                 diagnostics,
                 visitedGroupIds);
-            ValidateSemanticReferences(
-                children,
-                configMap,
-                warnings,
-                diagnostics);
-
             PsdUiToolkitVirtualGroupConfig[] groups = configMap.GetVirtualGroups();
             for (int i = 0; i < groups.Length; i++)
             {
@@ -79,81 +73,6 @@ namespace PsdTools.UIToolKit
                 children,
                 warnings,
                 diagnostics);
-        }
-
-        private static void ValidateSemanticReferences(
-            List<PsdUiToolkitLayoutNode> roots,
-            PsdUiToolkitLayerConfigMap configMap,
-            List<string> warnings,
-            List<PsdUiToolkitLayoutDiagnostic> diagnostics)
-        {
-            Dictionary<PsdUiToolkitNodeReference, PsdUiToolkitLayoutNode> nodes =
-                new Dictionary<PsdUiToolkitNodeReference, PsdUiToolkitLayoutNode>();
-            CollectNodes(roots, nodes);
-            PsdUiToolkitButtonSemanticConfig[] buttons = configMap.GetButtons();
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                PsdUiToolkitButtonSemanticConfig button = buttons[i];
-                if (button == null || !button.owner.IsValid)
-                    continue;
-                bool valid = nodes.TryGetValue(
-                        button.owner,
-                        out PsdUiToolkitLayoutNode owner)
-                    && button.TryGetState(
-                        PsdUiToolkitButtonVisualState.Normal,
-                        out PsdUiToolkitNodeReference normal)
-                    && IsDescendant(owner, normal);
-                if (!valid)
-                {
-                    AddWarning(
-                        warnings,
-                        diagnostics,
-                        "InvalidButtonNormalState",
-                        "A Button semantic has no valid Normal descendant and will export as a regular container.",
-                        button.owner.kind == PsdUiToolkitNodeReferenceKind.Layer
-                            ? button.owner.layerId
-                            : -1,
-                        button.owner.kind
-                            == PsdUiToolkitNodeReferenceKind.VirtualGroup
-                                ? button.owner.virtualGroupId
-                                : null);
-                }
-            }
-
-        }
-
-        private static void CollectNodes(
-            IEnumerable<PsdUiToolkitLayoutNode> source,
-            Dictionary<PsdUiToolkitNodeReference, PsdUiToolkitLayoutNode> nodes)
-        {
-            if (source == null)
-                return;
-            foreach (PsdUiToolkitLayoutNode node in source)
-            {
-                if (node == null)
-                    continue;
-                if (node.Reference.IsValid && !nodes.ContainsKey(node.Reference))
-                    nodes.Add(node.Reference, node);
-                CollectNodes(node.Children, nodes);
-            }
-        }
-
-        private static bool IsDescendant(
-            PsdUiToolkitLayoutNode root,
-            PsdUiToolkitNodeReference reference)
-        {
-            if (root == null)
-                return false;
-            for (int i = 0; i < root.Children.Count; i++)
-            {
-                PsdUiToolkitLayoutNode child = root.Children[i];
-                if (child.Reference.Equals(reference)
-                    || IsDescendant(child, reference))
-                {
-                    return true;
-                }
-            }
-            return false;
         }
 
         private static List<PsdUiToolkitLayoutNode> BuildChildren(
@@ -629,7 +548,7 @@ namespace PsdTools.UIToolKit
                 Math.Max(0, maxBottom - minTop));
         }
 
-        private static void OrderChildrenForFlow(
+        internal static void OrderChildrenForFlow(
             List<PsdUiToolkitLayoutNode> children,
             PsdUiToolkitLayoutType layoutType,
             PsdUiToolkitWrapMode wrapMode)
@@ -637,27 +556,18 @@ namespace PsdTools.UIToolKit
             if (children.Count <= 1)
                 return;
 
-            List<PsdUiToolkitLayoutNode> backgrounds = new List<PsdUiToolkitLayoutNode>();
             List<PsdUiToolkitLayoutNode> flow = new List<PsdUiToolkitLayoutNode>();
-            List<PsdUiToolkitLayoutNode> overlays = new List<PsdUiToolkitLayoutNode>();
             for (int i = 0; i < children.Count; i++)
             {
-                switch (children[i].ItemRole)
+                PsdUiToolkitLayoutNode child = children[i];
+                if (child != null
+                    && (child.IsSynthetic
+                        || child.ItemRole == PsdUiToolkitItemRole.FollowParent))
                 {
-                    case PsdUiToolkitItemRole.Background:
-                        backgrounds.Add(children[i]);
-                        break;
-                    case PsdUiToolkitItemRole.KeepAbsolute:
-                        overlays.Add(children[i]);
-                        break;
-                    default:
-                        flow.Add(children[i]);
-                        break;
+                    flow.Add(child);
                 }
             }
 
-            backgrounds.Sort(CompareByOriginalIndex);
-            overlays.Sort(CompareByOriginalIndex);
             if (wrapMode == PsdUiToolkitWrapMode.Wrap)
             {
                 flow.Sort(layoutType == PsdUiToolkitLayoutType.Row
@@ -671,10 +581,18 @@ namespace PsdTools.UIToolKit
                     : CompareByLeftThenTop);
             }
 
-            children.Clear();
-            children.AddRange(backgrounds);
-            children.AddRange(flow);
-            children.AddRange(overlays);
+            // Refill only flow slots so absolute nodes retain their PSD stacking positions.
+            int flowIndex = 0;
+            for (int i = 0; i < children.Count; i++)
+            {
+                PsdUiToolkitLayoutNode child = children[i];
+                if (child != null
+                    && (child.IsSynthetic
+                        || child.ItemRole == PsdUiToolkitItemRole.FollowParent))
+                {
+                    children[i] = flow[flowIndex++];
+                }
+            }
         }
 
         private static void AddOverlapWarning(
