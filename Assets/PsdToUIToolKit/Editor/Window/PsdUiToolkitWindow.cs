@@ -472,17 +472,16 @@ namespace PsdTools.UIToolKit
             string nodeName = string.IsNullOrEmpty(node.DisplayName)
                 ? (node.SourceLayer?.Name ?? "Unnamed")
                 : node.DisplayName;
-            string layoutBadge = node.LayoutType == PsdUiToolkitLayoutType.Row
-                ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "ROW · WRAP" : "ROW")
-                : (node.LayoutType == PsdUiToolkitLayoutType.Column
-                    ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "COL · WRAP" : "COL")
-                    : "ABS");
-            Color layoutBadgeColor = node.LayoutType == PsdUiToolkitLayoutType.Row
-                ? new Color(0.08f, 0.42f, 0.34f, 0.95f)
-                : (node.LayoutType == PsdUiToolkitLayoutType.Column
-                    ? new Color(0.35f, 0.22f, 0.52f, 0.95f)
-                    : new Color(0.20f, 0.29f, 0.42f, 0.95f));
-            row.Add(CreateLayerTreeBadge(layoutBadge, layoutBadgeColor));
+            if (node.LayoutType != PsdUiToolkitLayoutType.Absolute)
+            {
+                string layoutBadge = node.LayoutType == PsdUiToolkitLayoutType.Row
+                    ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "ROW · WRAP" : "ROW")
+                    : (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "COL · WRAP" : "COL");
+                Color layoutBadgeColor = node.LayoutType == PsdUiToolkitLayoutType.Row
+                    ? new Color(0.08f, 0.42f, 0.34f, 0.95f)
+                    : new Color(0.35f, 0.22f, 0.52f, 0.95f);
+                row.Add(CreateLayerTreeBadge(layoutBadge, layoutBadgeColor));
+            }
 
             Label nameLabel = new Label(nodeName)
             {
@@ -494,12 +493,6 @@ namespace PsdTools.UIToolKit
             nameLabel.style.overflow = Overflow.Hidden;
             row.Add(nameLabel);
 
-            if (node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute)
-            {
-                row.Add(CreateLayerTreeBadge(
-                    "FLOAT",
-                    new Color(0.56f, 0.32f, 0.08f, 0.95f)));
-            }
             if (node.SourceLayer != null
                 && _configMap != null
                 && !_configMap.IsExported(node.SourceLayer))
