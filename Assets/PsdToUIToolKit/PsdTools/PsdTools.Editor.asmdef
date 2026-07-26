@@ -1,7 +1,8 @@
 {
     "name": "PsdTools.Editor",
     "rootNamespace": "PsdTools",
-    "references": [],
+    "references": [
+    ],
     "includePlatforms": [
         "Editor"
     ],
