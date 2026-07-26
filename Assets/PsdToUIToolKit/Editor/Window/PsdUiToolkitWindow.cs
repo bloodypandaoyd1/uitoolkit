@@ -427,10 +427,9 @@ namespace PsdTools.UIToolKit
             row.style.paddingRight = 6f;
             row.style.backgroundColor = _selectedLayer == layer ? new Color(0.18f, 0.35f, 0.58f, 0.55f) : new Color(0f, 0f, 0f, 0f);
 
-            string layerKind = layer.Kind == LayerKind.Group ? "Group" : layer.Kind.ToString();
             string exportMarker = _configMap != null && !_configMap.IsExported(layer) ? "[Off] " : string.Empty;
             string visibilityMarker = layer.Visible ? string.Empty : "[Hidden] ";
-            row.text = $"{exportMarker}{visibilityMarker}{new string(' ', depth * 2)}{layer.Name} ({layerKind})";
+            row.text = $"{exportMarker}{visibilityMarker}{new string(' ', depth * 2)}{layer.Name}";
             _layerTreeScroll.Add(row);
             _layerRows[layer] = row;
 
@@ -460,8 +459,10 @@ namespace PsdTools.UIToolKit
                 evt.StopPropagation();
             });
             row.style.unityTextAlign = TextAnchor.MiddleLeft;
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
             row.style.marginBottom = 2f;
-            row.style.height = 24f;
+            row.style.height = 26f;
             row.style.paddingLeft = 6f + depth * 14f;
             row.style.paddingRight = 6f;
             row.style.backgroundColor = isSelected
@@ -471,29 +472,54 @@ namespace PsdTools.UIToolKit
             string nodeName = string.IsNullOrEmpty(node.DisplayName)
                 ? (node.SourceLayer?.Name ?? "Unnamed")
                 : node.DisplayName;
-            string prefix = node.IsSynthetic ? "[Layout] " : string.Empty;
-            string exportMarker = node.SourceLayer != null && _configMap != null && !_configMap.IsExported(node.SourceLayer) ? "[Off] " : string.Empty;
-            string visibilityMarker = node.SourceLayer != null && !node.SourceLayer.Visible ? "[Hidden] " : string.Empty;
-            string kindLabel = node.IsSynthetic
-                ? node.LayoutType.ToString()
-                : (node.SourceLayer == null
-                    ? "Layout"
-                    : (node.SourceLayer.Kind == LayerKind.Group
-                        ? (node.LayoutType == PsdUiToolkitLayoutType.Row || node.LayoutType == PsdUiToolkitLayoutType.Column
-                            ? $"Group/{node.LayoutType}"
-                            : "Group")
-                        : node.SourceLayer.Kind.ToString()));
-            string warningMarker = NodeHasWarning(node, nodeName) ? " [!]" : string.Empty;
-            string roleMarker = node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute
-                ? " [FLOAT]"
-                : string.Empty;
-            string layoutMarker = node.LayoutType == PsdUiToolkitLayoutType.Row
-                ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "[ROW/WRAP] " : "[ROW] ")
+            string layoutBadge = node.LayoutType == PsdUiToolkitLayoutType.Row
+                ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "ROW · WRAP" : "ROW")
                 : (node.LayoutType == PsdUiToolkitLayoutType.Column
-                    ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "[COL/WRAP] " : "[COL] ")
-                    : "[ABS] ");
-            row.text =
-                $"{exportMarker}{visibilityMarker}{new string(' ', depth * 2)}{layoutMarker}{prefix}{nodeName} ({kindLabel}){roleMarker}{warningMarker}";
+                    ? (node.WrapMode == PsdUiToolkitWrapMode.Wrap ? "COL · WRAP" : "COL")
+                    : "ABS");
+            Color layoutBadgeColor = node.LayoutType == PsdUiToolkitLayoutType.Row
+                ? new Color(0.08f, 0.42f, 0.34f, 0.95f)
+                : (node.LayoutType == PsdUiToolkitLayoutType.Column
+                    ? new Color(0.35f, 0.22f, 0.52f, 0.95f)
+                    : new Color(0.20f, 0.29f, 0.42f, 0.95f));
+            row.Add(CreateLayerTreeBadge(layoutBadge, layoutBadgeColor));
+
+            Label nameLabel = new Label(nodeName)
+            {
+                pickingMode = PickingMode.Ignore,
+            };
+            nameLabel.style.flexGrow = 1f;
+            nameLabel.style.flexShrink = 1f;
+            nameLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+            nameLabel.style.overflow = Overflow.Hidden;
+            row.Add(nameLabel);
+
+            if (node.ItemRole == PsdUiToolkitItemRole.KeepAbsolute)
+            {
+                row.Add(CreateLayerTreeBadge(
+                    "FLOAT",
+                    new Color(0.56f, 0.32f, 0.08f, 0.95f)));
+            }
+            if (node.SourceLayer != null
+                && _configMap != null
+                && !_configMap.IsExported(node.SourceLayer))
+            {
+                row.Add(CreateLayerTreeBadge(
+                    "OFF",
+                    new Color(0.40f, 0.16f, 0.16f, 0.95f)));
+            }
+            if (node.SourceLayer != null && !node.SourceLayer.Visible)
+            {
+                row.Add(CreateLayerTreeBadge(
+                    "HIDDEN",
+                    new Color(0.28f, 0.28f, 0.28f, 0.95f)));
+            }
+            if (NodeHasWarning(node, nodeName))
+            {
+                row.Add(CreateLayerTreeBadge(
+                    "!",
+                    new Color(0.62f, 0.42f, 0.04f, 0.95f)));
+            }
             if (node.SourceLayer == null && string.IsNullOrEmpty(node.VirtualGroupId))
                 row.SetEnabled(false);
             else
@@ -511,6 +537,28 @@ namespace PsdTools.UIToolKit
 
             for (int i = 0; i < node.Children.Count; i++)
                 AddLayoutNodeRow(node.Children[i], depth + 1);
+        }
+
+        private static Label CreateLayerTreeBadge(string text, Color backgroundColor)
+        {
+            Label badge = new Label(text)
+            {
+                pickingMode = PickingMode.Ignore,
+            };
+            badge.style.height = 16f;
+            badge.style.marginRight = 5f;
+            badge.style.paddingLeft = 5f;
+            badge.style.paddingRight = 5f;
+            badge.style.fontSize = 9f;
+            badge.style.unityFontStyleAndWeight = FontStyle.Bold;
+            badge.style.unityTextAlign = TextAnchor.MiddleCenter;
+            badge.style.color = new Color(0.94f, 0.96f, 1f, 1f);
+            badge.style.backgroundColor = backgroundColor;
+            badge.style.borderTopLeftRadius = 4f;
+            badge.style.borderTopRightRadius = 4f;
+            badge.style.borderBottomLeftRadius = 4f;
+            badge.style.borderBottomRightRadius = 4f;
+            return badge;
         }
 
         private void RegisterLayoutNodeDragSource(
