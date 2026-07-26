@@ -2420,6 +2420,9 @@ namespace PsdTools.UIToolKit
             }
 
             float scale = _layoutCanvasDrawWidth / Math.Max(1, _currentLayoutTree.Width);
+            PsdUiToolkitFontMappingLookup fontMapping =
+                new PsdUiToolkitFontMappingLookup(
+                    PsdUiToolkitFontMappingConfig.Load());
             _layoutCanvasRoot = new VisualElement();
             _layoutCanvasRoot.style.position = Position.Absolute;
             _layoutCanvasRoot.style.left = 0f;
@@ -2436,7 +2439,8 @@ namespace PsdTools.UIToolKit
                     0,
                     0,
                     PsdUiToolkitFlowChildPlacement.Absolute,
-                    scale);
+                    scale,
+                    fontMapping);
                 if (child != null)
                     _layoutCanvasRoot.Add(child);
             }
@@ -2447,7 +2451,8 @@ namespace PsdTools.UIToolKit
             int parentLeft,
             int parentTop,
             PsdUiToolkitFlowChildPlacement placement,
-            float scale)
+            float scale,
+            PsdUiToolkitFontMappingLookup fontMapping)
         {
             if (node == null)
                 return null;
@@ -2492,7 +2497,7 @@ namespace PsdTools.UIToolKit
             PsdUiToolkitFlowContainerPlan flowPlan =
                 PsdUiToolkitFlowLayoutResolver.Resolve(node, _configMap);
             ApplyLayoutPreviewContainerStyle(element, flowPlan, scale);
-            AddLayoutPreviewContent(element, node);
+            AddLayoutPreviewContent(element, node, scale, fontMapping);
 
             element.RegisterCallback<PointerDownEvent>(evt =>
             {
@@ -2520,7 +2525,8 @@ namespace PsdTools.UIToolKit
                     bounds.Left,
                     bounds.Top,
                     childPlacement,
-                    scale);
+                    scale,
+                    fontMapping);
                 if (child != null)
                     element.Add(child);
             }
@@ -2672,7 +2678,9 @@ namespace PsdTools.UIToolKit
 
         private void AddLayoutPreviewContent(
             VisualElement element,
-            PsdUiToolkitLayoutNode node)
+            PsdUiToolkitLayoutNode node,
+            float scale,
+            PsdUiToolkitFontMappingLookup fontMapping)
         {
             Layer layer = node.SourceLayer;
             if (layer == null || node.Children.Count > 0)
@@ -2692,8 +2700,53 @@ namespace PsdTools.UIToolKit
                 text.style.bottom = 0f;
                 text.style.unityTextAlign = TextAnchor.MiddleCenter;
                 text.style.whiteSpace = WhiteSpace.NoWrap;
-                text.style.fontSize = Math.Max(6f, typeLayer.EffectiveFontSize
-                    * _layoutCanvasDrawWidth / Math.Max(1, _psd.Width));
+                text.style.fontSize = Math.Max(
+                    6f,
+                    typeLayer.EffectiveFontSize * scale);
+
+                Object fontAsset = fontMapping?.ResolveAsset(
+                    typeLayer.PsdFontName);
+                if (fontAsset is Font font)
+                {
+                    text.style.unityFontDefinition =
+                        FontDefinition.FromFont(font);
+                }
+                else if (fontAsset
+                    is UnityEngine.TextCore.Text.FontAsset textCoreFont)
+                {
+                    text.style.unityFontDefinition =
+                        FontDefinition.FromSDFFont(textCoreFont);
+                }
+
+                if (PsdUiToolkitTextEffectsHelper.TryConvertFillColor(
+                    typeLayer.FillColor,
+                    out Color fillColor))
+                {
+                    text.style.color = fillColor;
+                }
+
+                if (PsdUiToolkitTextEffectsHelper.TryGetStrokeEffect(
+                    layer,
+                    out Color strokeColor,
+                    out float strokeSize))
+                {
+                    text.style.unityTextOutlineWidth =
+                        PsdUiToolkitTextEffectsHelper.CalculateOutlineWidth(
+                            typeLayer.EffectiveFontSize,
+                            strokeSize) * scale;
+                    text.style.unityTextOutlineColor = strokeColor;
+                }
+
+                if (PsdUiToolkitTextEffectsHelper.TryEnsureTextGradientAsset(
+                    layer,
+                    out string gradientAssetName))
+                {
+                    text.text =
+                        $"<color=white><gradient=\"{gradientAssetName}\">"
+                        + $"{typeLayer.Text ?? string.Empty}</gradient></color>";
+                    text.enableRichText = true;
+                }
+
                 element.Add(text);
                 return;
             }

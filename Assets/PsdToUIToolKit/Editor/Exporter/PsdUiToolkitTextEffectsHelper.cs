@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using PsdTools.Layers;
+using UnityEditor;
 using UnityEngine;
+using UnityEngine.TextCore.Text;
 
 namespace PsdTools.UIToolKit
 {
@@ -11,6 +13,98 @@ namespace PsdTools.UIToolKit
         {
             public float position; // 0-1
             public byte r, g, b;
+        }
+
+        public static bool TryConvertFillColor(
+            float[] fillColor,
+            out Color color)
+        {
+            color = Color.clear;
+            if (fillColor == null || fillColor.Length < 4)
+                return false;
+
+            int red = Mathf.Clamp(
+                Mathf.RoundToInt(fillColor[1] * 255f),
+                0,
+                255);
+            int green = Mathf.Clamp(
+                Mathf.RoundToInt(fillColor[2] * 255f),
+                0,
+                255);
+            int blue = Mathf.Clamp(
+                Mathf.RoundToInt(fillColor[3] * 255f),
+                0,
+                255);
+            color = new Color(
+                red / 255f,
+                green / 255f,
+                blue / 255f,
+                Mathf.Clamp01(fillColor[0]));
+            return true;
+        }
+
+        public static float CalculateOutlineWidth(
+            float effectiveFontSize,
+            float strokeSize)
+        {
+            return Mathf.Clamp01(
+                strokeSize / Mathf.Max(1f, effectiveFontSize) * 2f);
+        }
+
+        public static bool TryEnsureTextGradientAsset(
+            Layer layer,
+            out string assetName)
+        {
+            assetName = string.Empty;
+            if (layer?.LayerId == null
+                || !TryGetTextGradientCornersFromLayer(
+                    layer,
+                    out Color32 topLeft,
+                    out Color32 topRight,
+                    out Color32 bottomLeft,
+                    out Color32 bottomRight))
+            {
+                return false;
+            }
+
+            string folder = EnsureGradientFolder();
+            string layerName =
+                PsdUiToolkitAssetPathUtility.SanitizeFileName(layer.Name);
+            assetName = $"Gradient_{layer.LayerId.Value}_{layerName}";
+            string assetPath = $"{folder}/{assetName}.asset";
+            TextColorGradient gradientAsset =
+                AssetDatabase.LoadAssetAtPath<TextColorGradient>(assetPath);
+            bool saveAsset = false;
+            if (gradientAsset == null)
+            {
+                gradientAsset = ScriptableObject.CreateInstance<TextColorGradient>();
+                gradientAsset.colorMode = ColorGradientMode.FourCornersGradient;
+                gradientAsset.topLeft = topLeft;
+                gradientAsset.topRight = topRight;
+                gradientAsset.bottomLeft = bottomLeft;
+                gradientAsset.bottomRight = bottomRight;
+                AssetDatabase.CreateAsset(gradientAsset, assetPath);
+                saveAsset = true;
+            }
+            else if (gradientAsset.colorMode
+                    != ColorGradientMode.FourCornersGradient
+                || !gradientAsset.topLeft.Equals(topLeft)
+                || !gradientAsset.topRight.Equals(topRight)
+                || !gradientAsset.bottomLeft.Equals(bottomLeft)
+                || !gradientAsset.bottomRight.Equals(bottomRight))
+            {
+                gradientAsset.colorMode = ColorGradientMode.FourCornersGradient;
+                gradientAsset.topLeft = topLeft;
+                gradientAsset.topRight = topRight;
+                gradientAsset.bottomLeft = bottomLeft;
+                gradientAsset.bottomRight = bottomRight;
+                EditorUtility.SetDirty(gradientAsset);
+                saveAsset = true;
+            }
+
+            if (saveAsset)
+                AssetDatabase.SaveAssets();
+            return true;
         }
 
         public static bool TryGetStrokeEffect(Layer layer, out Color strokeColor, out float strokeSize)
@@ -380,6 +474,25 @@ namespace PsdTools.UIToolKit
             g = (byte)Mathf.Clamp(Mathf.RoundToInt((float)grnVal), 0, 255);
             b = (byte)Mathf.Clamp(Mathf.RoundToInt((float)blVal), 0, 255);
             return true;
+        }
+
+        private static string EnsureGradientFolder()
+        {
+            const string presetPath = "Assets/Resources/Text Color Gradients";
+            string[] folders = presetPath.Split(
+                new[] { '/', '\\' },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            string currentPath = folders[0];
+            for (int i = 1; i < folders.Length; i++)
+            {
+                string nextPath = currentPath + "/" + folders[i];
+                if (!AssetDatabase.IsValidFolder(nextPath))
+                    AssetDatabase.CreateFolder(currentPath, folders[i]);
+                currentPath = nextPath;
+            }
+
+            return currentPath;
         }
     }
 }

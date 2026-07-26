@@ -51,15 +51,23 @@ namespace PsdTools.UIToolKit
 
         public string ResolveStyleUri(string psdFontName)
         {
+            Object asset = ResolveAsset(psdFontName);
+            return asset != null
+                ? PsdUiToolkitAssetPathUtility.BuildProjectDatabaseUri(asset)
+                : string.Empty;
+        }
+
+        public Object ResolveAsset(string psdFontName)
+        {
             string key = (psdFontName ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(key) || !_entries.TryGetValue(key, out PsdUiToolkitFontMappingEntry entry))
-                return string.Empty;
+                return null;
             if (string.IsNullOrEmpty(entry.fontAssetPath))
-                return string.Empty;
+                return null;
 
             Object asset = PsdUiToolkitFontMappingConfig.LoadSupportedFontAsset(entry.fontAssetPath);
             if (asset != null)
-                return PsdUiToolkitAssetPathUtility.BuildProjectDatabaseUri(asset);
+                return asset;
 
             if (_warnedInvalidMappings.Add(key))
             {
@@ -68,7 +76,7 @@ namespace PsdTools.UIToolKit
                     "The UI Toolkit default font will be used.");
             }
 
-            return string.Empty;
+            return null;
         }
     }
 

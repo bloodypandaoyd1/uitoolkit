@@ -112,37 +112,12 @@ namespace PsdTools.UIToolKit
                 TypeLayer typeLayer = (TypeLayer)layer;
                 string rawText = NormalizeExplicitLineBreaks(typeLayer.Text, out bool hasExplicitLineBreak);
 
-                if (PsdUiToolkitTextEffectsHelper.TryGetTextGradientCornersFromLayer(layer, out Color32 cTL, out Color32 cTR, out Color32 cBL, out Color32 cBR))
+                if (PsdUiToolkitTextEffectsHelper.TryEnsureTextGradientAsset(
+                    layer,
+                    out string gradientAssetName))
                 {
-                    string folder = EnsureAndGetGradientFolder();
-                    string layerNameSanitized = PsdUiToolkitAssetPathUtility.SanitizeFileName(layer.Name);
-                    string assetName = $"Gradient_{layer.LayerId}_{layerNameSanitized}";
-                    string assetPath = $"{folder}/{assetName}.asset";
-                    
-                    UnityEngine.TextCore.Text.TextColorGradient gradientAsset = UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.TextCore.Text.TextColorGradient>(assetPath);
-                    if (gradientAsset == null)
-                    {
-                        gradientAsset = UnityEngine.ScriptableObject.CreateInstance<UnityEngine.TextCore.Text.TextColorGradient>();
-                        gradientAsset.colorMode = UnityEngine.TextCore.Text.ColorGradientMode.FourCornersGradient;
-                        gradientAsset.topLeft = cTL;
-                        gradientAsset.topRight = cTR;
-                        gradientAsset.bottomLeft = cBL;
-                        gradientAsset.bottomRight = cBR;
-                        UnityEditor.AssetDatabase.CreateAsset(gradientAsset, assetPath);
-                    }
-                    else
-                    {
-                        gradientAsset.colorMode = UnityEngine.TextCore.Text.ColorGradientMode.FourCornersGradient;
-                        gradientAsset.topLeft = cTL;
-                        gradientAsset.topRight = cTR;
-                        gradientAsset.bottomLeft = cBL;
-                        gradientAsset.bottomRight = cBR;
-                        UnityEditor.EditorUtility.SetDirty(gradientAsset);
-                    }
-                    UnityEditor.AssetDatabase.SaveAssets();
-
                     // UI Toolkit drops rich-text gradients when an outline is set unless the vertex color is reset inline (UUM-86168).
-                    rawText = $"<color=white><gradient=\"{assetName}\">{rawText}</gradient></color>";
+                    rawText = $"<color=white><gradient=\"{gradientAssetName}\">{rawText}</gradient></color>";
                 }
 
                 string richTextAttr = hasExplicitLineBreak || rawText.Contains("<gradient=")
@@ -243,13 +218,20 @@ namespace PsdTools.UIToolKit
                 string fontUri = fontMapping?.ResolveStyleUri(typeLayer.PsdFontName);
                 if (!string.IsNullOrEmpty(fontUri))
                     style.AppendFormat(CultureInfo.InvariantCulture, " -unity-font-definition: url('{0}');", fontUri);
-                if (typeLayer.FillColor != null && typeLayer.FillColor.Length >= 4)
+                if (PsdUiToolkitTextEffectsHelper.TryConvertFillColor(
+                    typeLayer.FillColor,
+                    out Color fillColor))
                 {
-                    int red = Mathf.Clamp(Mathf.RoundToInt(typeLayer.FillColor[1] * 255f), 0, 255);
-                    int green = Mathf.Clamp(Mathf.RoundToInt(typeLayer.FillColor[2] * 255f), 0, 255);
-                    int blue = Mathf.Clamp(Mathf.RoundToInt(typeLayer.FillColor[3] * 255f), 0, 255);
-                    float alpha = Mathf.Clamp01(typeLayer.FillColor[0]);
-                    style.AppendFormat(CultureInfo.InvariantCulture, " color: rgba({0}, {1}, {2}, {3:0.###});", red, green, blue, alpha);
+                    int red = Mathf.RoundToInt(fillColor.r * 255f);
+                    int green = Mathf.RoundToInt(fillColor.g * 255f);
+                    int blue = Mathf.RoundToInt(fillColor.b * 255f);
+                    style.AppendFormat(
+                        CultureInfo.InvariantCulture,
+                        " color: rgba({0}, {1}, {2}, {3:0.###});",
+                        red,
+                        green,
+                        blue,
+                        fillColor.a);
                 }
 
                 if (PsdUiToolkitTextEffectsHelper.TryGetStrokeEffect(layer, out Color strokeColor, out float strokeSize))
@@ -257,7 +239,10 @@ namespace PsdTools.UIToolKit
                     int sr = Mathf.Clamp(Mathf.RoundToInt(strokeColor.r * 255f), 0, 255);
                     int sg = Mathf.Clamp(Mathf.RoundToInt(strokeColor.g * 255f), 0, 255);
                     int sb = Mathf.Clamp(Mathf.RoundToInt(strokeColor.b * 255f), 0, 255);
-                    float outlineWidth = Mathf.Clamp01(strokeSize / Mathf.Max(1f, typeLayer.EffectiveFontSize) * 2f);
+                    float outlineWidth =
+                        PsdUiToolkitTextEffectsHelper.CalculateOutlineWidth(
+                            typeLayer.EffectiveFontSize,
+                            strokeSize);
                     style.AppendFormat(CultureInfo.InvariantCulture, " -unity-text-outline-width: {0:0.###}px;", outlineWidth);
                     style.AppendFormat(CultureInfo.InvariantCulture, " -unity-text-outline-color: rgba({0}, {1}, {2}, {3:0.###});", sr, sg, sb, strokeColor.a);
                 }
@@ -406,25 +391,6 @@ namespace PsdTools.UIToolKit
         private static string EscapeAttribute(string value)
         {
             return SecurityElement.Escape(value ?? string.Empty) ?? string.Empty;
-        }
-
-
-        private static string EnsureAndGetGradientFolder()
-        {
-            string presetPath = "Assets/Resources/Text Color Gradients";
-            var folderList = presetPath.Split(new[] { '/', '\\' }, System.StringSplitOptions.RemoveEmptyEntries);
-
-            string currentPath = folderList[0];
-            for (int i = 1; i < folderList.Length; i++)
-            {
-                string nextPath = currentPath + "/" + folderList[i];
-                if (!UnityEditor.AssetDatabase.IsValidFolder(nextPath))
-                {
-                    UnityEditor.AssetDatabase.CreateFolder(currentPath, folderList[i]);
-                }
-                currentPath = nextPath;
-            }
-            return currentPath;
         }
     }
 }
