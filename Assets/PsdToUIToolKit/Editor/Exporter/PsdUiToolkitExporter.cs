@@ -57,8 +57,12 @@ namespace PsdTools.UIToolKit
 
         public string UxmlAssetPath
         {
-            get => GeneratedUxmlAssetPath;
-            internal set => GeneratedUxmlAssetPath = value;
+            get => EditableUxmlAssetPath ?? GeneratedUxmlAssetPath;
+            internal set
+            {
+                GeneratedUxmlAssetPath = value;
+                EditableUxmlAssetPath = value;
+            }
         }
     }
 
@@ -1449,6 +1453,26 @@ namespace PsdTools.UIToolKit
 
     public static class PsdUiToolkitExporter
     {
+        internal static void GetOutputAssetPaths(
+            string psdPath,
+            string uxmlExportRoot,
+            out string uxmlAssetPath,
+            out string ussAssetPath)
+        {
+            string psdName = Path.GetFileNameWithoutExtension(psdPath);
+            string uxmlRoot =
+                PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(
+                    uxmlExportRoot);
+            uxmlAssetPath =
+                PsdUiToolkitAssetPathUtility.CombineAssetsPath(
+                    uxmlRoot,
+                    psdName + ".uxml");
+            ussAssetPath =
+                PsdUiToolkitAssetPathUtility.CombineAssetsPath(
+                    uxmlRoot,
+                    psdName + ".uss");
+        }
+
         private static void DeleteStaleGeneratedImages(string imageFolderAssetPath, PsdUiToolkitRasterExportResult rasterResult)
         {
             HashSet<string> currentAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1496,14 +1520,15 @@ namespace PsdTools.UIToolKit
             string imageRoot = PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(imageExportRoot);
             string uxmlRoot = PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(uxmlExportRoot);
             string imageFolderAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(imageRoot, psdName);
-            string generatedUxmlAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, psdName + ".generated.uxml");
-            string editableUxmlAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, psdName + ".uxml");
-            string generatedUssAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, psdName + ".generated.uss");
-            string editableUssAssetPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(uxmlRoot, psdName + ".uss");
+            GetOutputAssetPaths(
+                psdPath,
+                uxmlRoot,
+                out string uxmlAssetPath,
+                out string ussAssetPath);
 
             PsdUiToolkitAssetPathUtility.EnsureAssetDirectoryExists(imageRoot);
             PsdUiToolkitAssetPathUtility.EnsureAssetDirectoryExists(imageFolderAssetPath);
-            PsdUiToolkitAssetPathUtility.EnsureParentDirectoryForFile(generatedUxmlAssetPath);
+            PsdUiToolkitAssetPathUtility.EnsureParentDirectoryForFile(uxmlAssetPath);
 
             PsdImage psd = null;
             try
@@ -1522,8 +1547,8 @@ namespace PsdTools.UIToolKit
                     configMap,
                     rasterResult,
                     fontMapping,
-                    generatedUxmlAssetPath,
-                    generatedUssAssetPath);
+                    uxmlAssetPath,
+                    ussAssetPath);
                 for (int i = 0; i < layoutTree.Warnings.Count; i++)
                     Debug.LogWarning($"[PsdUiToolkit] {layoutTree.Warnings[i]}");
                 DeleteStaleGeneratedImages(imageFolderAssetPath, rasterResult);
@@ -1532,10 +1557,10 @@ namespace PsdTools.UIToolKit
                 return new PsdUiToolkitExportArtifacts
                 {
                     ImageFolderAssetPath = imageFolderAssetPath,
-                    GeneratedUxmlAssetPath = generatedUxmlAssetPath,
-                    EditableUxmlAssetPath = editableUxmlAssetPath,
-                    GeneratedUssAssetPath = generatedUssAssetPath,
-                    EditableUssAssetPath = editableUssAssetPath,
+                    GeneratedUxmlAssetPath = uxmlAssetPath,
+                    EditableUxmlAssetPath = uxmlAssetPath,
+                    GeneratedUssAssetPath = ussAssetPath,
+                    EditableUssAssetPath = ussAssetPath,
                 };
             }
             finally

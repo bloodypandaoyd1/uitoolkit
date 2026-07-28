@@ -410,6 +410,205 @@ namespace PsdTools.UIToolKit.Tests
         }
 
         [Test]
+        public void TextStrokeParser_ReadsCurrentPsdStroke()
+        {
+            PsdImage psd = PsdImage.Open(
+                PsdUiToolkitAssetPathUtility.GetDiskPath(
+                    "Assets/PsdToUIToolKit/psdui.psd"));
+            try
+            {
+                List<Layer> layers = new List<Layer>();
+                PsdUiToolkitConfigStore.CollectLayers(psd.Root, layers);
+                Layer buyText = layers.Find(layer => layer.LayerId == 177);
+                Assert.That(buyText, Is.Not.Null);
+                Assert.That(
+                    PsdUiToolkitTextEffectsHelper.TryGetStrokeEffect(
+                        buyText,
+                        out Color strokeColor,
+                        out float strokeSize),
+                    Is.True);
+                Assert.That(strokeSize, Is.EqualTo(2f).Within(0.0001f));
+                Assert.That(strokeColor.a, Is.EqualTo(1f).Within(0.0001f));
+            }
+            finally
+            {
+                psd.ReleaseAllData();
+            }
+        }
+
+        [Test]
+        public void PsdPreviewOutline_ExpandsAlphaWithoutChangingSourcePixel()
+        {
+            Texture2D source = new Texture2D(
+                1,
+                1,
+                TextureFormat.RGBA32,
+                false);
+            source.SetPixel(0, 0, Color.white);
+            source.Apply();
+
+            Texture2D outlined =
+                PsdUiToolkitPsdPreviewCompositor.CreateTextOutlineTexture(
+                    source,
+                    Color.red,
+                    1f,
+                    out int expansion);
+            try
+            {
+                Assert.That(expansion, Is.EqualTo(1));
+                Assert.That(outlined.width, Is.EqualTo(3));
+                Assert.That(outlined.height, Is.EqualTo(3));
+                Assert.That(outlined.GetPixel(1, 1), Is.EqualTo(Color.white));
+                Assert.That(outlined.GetPixel(1, 0).r, Is.EqualTo(1f));
+                Assert.That(outlined.GetPixel(1, 0).a, Is.EqualTo(1f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(outlined);
+                Object.DestroyImmediate(source);
+            }
+        }
+
+        [Test]
+        public void PsdPreviewLayerOrder_TopLayerOccludesTextOutline()
+        {
+            Texture2D source = new Texture2D(
+                1,
+                1,
+                TextureFormat.RGBA32,
+                false);
+            source.SetPixel(0, 0, Color.white);
+            source.Apply();
+            Texture2D outlined =
+                PsdUiToolkitPsdPreviewCompositor.CreateTextOutlineTexture(
+                    source,
+                    Color.red,
+                    1f,
+                    out _);
+            try
+            {
+                Color32[] canvas = new Color32[9];
+                PsdUiToolkitPsdPreviewCompositor.BlitPixelRectOntoCanvas(
+                    outlined.GetPixels32(),
+                    0,
+                    0,
+                    3,
+                    3,
+                    1f,
+                    canvas,
+                    3,
+                    3);
+                PsdUiToolkitPsdPreviewCompositor.BlitPixelRectOntoCanvas(
+                    new[] { new Color32(0, 0, 255, 255) },
+                    1,
+                    0,
+                    1,
+                    1,
+                    1f,
+                    canvas,
+                    3,
+                    3);
+
+                Assert.That(canvas[7], Is.EqualTo(
+                    new Color32(0, 0, 255, 255)));
+            }
+            finally
+            {
+                Object.DestroyImmediate(outlined);
+                Object.DestroyImmediate(source);
+            }
+        }
+
+        [Test]
+        public void PsdPreviewCompositor_AddsStrokeAndPreservesBaseComposition()
+        {
+            PsdImage psd = PsdImage.Open(
+                PsdUiToolkitAssetPathUtility.GetDiskPath(
+                    "Assets/PsdToUIToolKit/psdui.psd"));
+            try
+            {
+                List<Layer> layers = new List<Layer>();
+                PsdUiToolkitConfigStore.CollectLayers(psd.Root, layers);
+                List<Layer> strokedTextLayers = layers.FindAll(
+                    layer => layer.Kind == LayerKind.Type
+                        && PsdUiToolkitTextEffectsHelper.TryGetStrokeEffect(
+                            layer,
+                            out _,
+                            out _));
+                Assert.That(strokedTextLayers, Is.Not.Empty);
+
+                Texture2D basePreview = psd.CompositeFromLayersOnly();
+                Texture2D strokePreview =
+                    PsdUiToolkitPsdPreviewCompositor.Create(psd);
+                try
+                {
+                    Assert.That(strokePreview.width, Is.EqualTo(psd.Width));
+                    Assert.That(strokePreview.height, Is.EqualTo(psd.Height));
+                    Color32[] basePixels = basePreview.GetPixels32();
+                    Color32[] strokePixels = strokePreview.GetPixels32();
+                    int changedPixels = 0;
+                    for (int index = 0;
+                        index < basePixels.Length;
+                        index++)
+                    {
+                        if (!basePixels[index].Equals(strokePixels[index]))
+                            changedPixels++;
+                    }
+                    Assert.That(changedPixels, Is.GreaterThan(0));
+                }
+                finally
+                {
+                    Object.DestroyImmediate(strokePreview);
+                    Object.DestroyImmediate(basePreview);
+                }
+
+                bool[] originalVisibility =
+                    new bool[strokedTextLayers.Count];
+                for (int index = 0;
+                    index < strokedTextLayers.Count;
+                    index++)
+                {
+                    originalVisibility[index] =
+                        strokedTextLayers[index].Visible;
+                    strokedTextLayers[index].Visible = false;
+                }
+
+                try
+                {
+                    Texture2D baseWithoutStrokes =
+                        psd.CompositeFromLayersOnly();
+                    Texture2D previewWithoutStrokes =
+                        PsdUiToolkitPsdPreviewCompositor.Create(psd);
+                    try
+                    {
+                        CollectionAssert.AreEqual(
+                            baseWithoutStrokes.GetPixels32(),
+                            previewWithoutStrokes.GetPixels32());
+                    }
+                    finally
+                    {
+                        Object.DestroyImmediate(previewWithoutStrokes);
+                        Object.DestroyImmediate(baseWithoutStrokes);
+                    }
+                }
+                finally
+                {
+                    for (int index = 0;
+                        index < strokedTextLayers.Count;
+                        index++)
+                    {
+                        strokedTextLayers[index].Visible =
+                            originalVisibility[index];
+                    }
+                }
+            }
+            finally
+            {
+                psd.ReleaseAllData();
+            }
+        }
+
+        [Test]
         public void FontMapping_BlankOrMissingAssetFallsBackToDefault()
         {
             PsdUiToolkitFontMappingLookup lookup =
@@ -429,6 +628,25 @@ namespace PsdTools.UIToolKit.Tests
             Assert.That(lookup.ResolveAsset("Blank"), Is.Null);
             Assert.That(lookup.ResolveAsset("Missing"), Is.Null);
             Assert.That(lookup.ResolveStyleUri("Blank"), Is.Empty);
+        }
+
+        [Test]
+        public void ExportOutputPaths_UseFinalNamesWithoutGeneratedDraft()
+        {
+            PsdUiToolkitExporter.GetOutputAssetPaths(
+                "/tmp/Shop Screen.psd",
+                "Assets/Generated/Uxml/",
+                out string uxmlPath,
+                out string ussPath);
+
+            Assert.That(
+                uxmlPath,
+                Is.EqualTo("Assets/Generated/Uxml/Shop Screen.uxml"));
+            Assert.That(
+                ussPath,
+                Is.EqualTo("Assets/Generated/Uxml/Shop Screen.uss"));
+            Assert.That(uxmlPath, Does.Not.Contain(".generated."));
+            Assert.That(ussPath, Does.Not.Contain(".generated."));
         }
 
         [Test]

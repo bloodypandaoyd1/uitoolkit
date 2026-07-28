@@ -144,7 +144,7 @@ namespace PsdTools.UIToolKit
             ToolbarButton reloadButton = new ToolbarButton(ReloadPsd) { text = "Reload" };
             _undoButton = new ToolbarButton(UndoLayoutEdit) { text = "Undo" };
             _redoButton = new ToolbarButton(RedoLayoutEdit) { text = "Redo" };
-            ToolbarButton exportButton = new ToolbarButton(RecreateEditable) { text = "Export" };
+            ToolbarButton exportButton = new ToolbarButton(ExportCurrentPsd) { text = "Export" };
 
             toolbar.Add(openButton);
             toolbar.Add(reloadButton);
@@ -2260,7 +2260,8 @@ namespace PsdTools.UIToolKit
 
             try
             {
-                _psdCompositePreview = _psd.CompositeFromLayersOnly();
+                _psdCompositePreview =
+                    PsdUiToolkitPsdPreviewCompositor.Create(_psd);
                 if (_psdCompositePreview != null)
                     _psdCompositePreview.hideFlags = HideFlags.HideAndDontSave;
             }
@@ -3133,79 +3134,81 @@ namespace PsdTools.UIToolKit
             });
         }
 
-        private void RecreateEditable()
+        private void ExportCurrentPsd()
         {
             if (_psd == null || string.IsNullOrEmpty(_psdPath))
             {
-                EditorUtility.DisplayDialog("PSD UI Toolkit", "Open a PSD before creating an editable UXML.", "OK");
+                EditorUtility.DisplayDialog("PSD UI Toolkit", "Open a PSD before exporting.", "OK");
                 return;
             }
 
-            GetCurrentUxmlPaths(out string generatedPath, out string editablePath);
-            Dictionary<string, string> copyPlan = null;
             try
             {
-                copyPlan = PsdUiToolkitExporter.BuildEditableCopyPlan(
-                    generatedPath,
-                    editablePath);
-            }
-            catch
-            {
-                // The exporter below reports the actionable missing-draft error.
-            }
-            List<string> existingFiles = new List<string>();
-            if (copyPlan != null)
-            {
-                foreach (string target in copyPlan.Values)
+                PersistConfig();
+                string imageRoot =
+                    PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(
+                        PsdUiToolkitEditorPrefs.ImageExportRoot);
+                string uxmlRoot =
+                    PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(
+                        PsdUiToolkitEditorPrefs.UxmlExportRoot);
+                PsdUiToolkitEditorPrefs.ImageExportRoot = imageRoot;
+                PsdUiToolkitEditorPrefs.UxmlExportRoot = uxmlRoot;
+
+                PsdUiToolkitExporter.GetOutputAssetPaths(
+                    _psdPath,
+                    uxmlRoot,
+                    out string uxmlPath,
+                    out string ussPath);
+                List<string> existingFiles = new List<string>();
+                if (File.Exists(
+                    PsdUiToolkitAssetPathUtility.GetDiskPath(uxmlPath)))
                 {
-                    if (File.Exists(PsdUiToolkitAssetPathUtility.GetDiskPath(target)))
-                        existingFiles.Add(target);
+                    existingFiles.Add(uxmlPath);
                 }
-            }
-            if (existingFiles.Count > 0
-                && !EditorUtility.DisplayDialog(
-                    "Recreate Editable Asset Family",
-                    "The following UI Builder files will be replaced:\n\n"
-                    + string.Join("\n", existingFiles)
-                    + "\n\nAll changes in these files will be lost.",
-                    "Replace All",
-                    "Cancel"))
-            {
-                return;
-            }
-
-            try
-            {
-                string resultPath = PsdUiToolkitExporter.CreateEditableCopy(generatedPath, editablePath, true);
-                Object editableAsset = AssetDatabase.LoadAssetAtPath<Object>(resultPath);
-                if (editableAsset != null)
+                if (File.Exists(
+                    PsdUiToolkitAssetPathUtility.GetDiskPath(ussPath)))
                 {
-                    Selection.activeObject = editableAsset;
+                    existingFiles.Add(ussPath);
+                }
+                if (existingFiles.Count > 0
+                    && !EditorUtility.DisplayDialog(
+                        "Export UI Assets",
+                        "The following UI Builder files will be replaced:\n\n"
+                        + string.Join("\n", existingFiles)
+                        + "\n\nAll changes in these files will be lost.",
+                        "Replace All",
+                        "Cancel"))
+                {
+                    return;
+                }
+
+                PsdUiToolkitExportArtifacts artifacts =
+                    PsdUiToolkitExporter.Export(
+                        _psdPath,
+                        imageRoot,
+                        uxmlRoot,
+                        PsdUiToolkitEditorPrefs.AutoImageNaming);
+                Object exportedAsset =
+                    AssetDatabase.LoadAssetAtPath<Object>(
+                        artifacts.UxmlAssetPath);
+                if (exportedAsset != null)
+                {
+                    Selection.activeObject = exportedAsset;
                     EditorUtility.FocusProjectWindow();
-                    EditorGUIUtility.PingObject(editableAsset);
-                    AssetDatabase.OpenAsset(editableAsset);
+                    EditorGUIUtility.PingObject(exportedAsset);
+                    AssetDatabase.OpenAsset(exportedAsset);
                 }
 
-                UpdateStatus(existingFiles.Count == 0
-                    ? $"Created editable asset family: {resultPath}"
-                    : $"Recreated editable asset family: {resultPath}");
+                UpdateStatus($"Exported UXML: {artifacts.UxmlAssetPath}");
             }
             catch (Exception ex)
             {
-                UpdateStatus($"Editable UXML failed: {ex.Message}");
+                UpdateStatus($"Export failed: {ex.Message}");
                 EditorUtility.DisplayDialog(
                     "PSD UI Toolkit",
-                    $"Could not create the editable UXML.\n\n{ex.Message}",
+                    $"Export failed:\n\n{ex.Message}",
                     "OK");
             }
-        }
-
-        private void GetCurrentUxmlPaths(out string generatedPath, out string editablePath)
-        {
-            string root = PsdUiToolkitAssetPathUtility.NormalizeAssetsPath(PsdUiToolkitEditorPrefs.UxmlExportRoot);
-            string psdName = Path.GetFileNameWithoutExtension(_psdPath);
-            generatedPath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(root, psdName + ".generated.uxml");
-            editablePath = PsdUiToolkitAssetPathUtility.CombineAssetsPath(root, psdName + ".uxml");
         }
 
         private void UpdateStatus(string message)
