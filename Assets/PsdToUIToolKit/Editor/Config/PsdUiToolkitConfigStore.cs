@@ -139,6 +139,11 @@ namespace PsdTools.UIToolKit
             return data;
         }
 
+        public static PsdUiToolkitExportConfigData CreateDefaultConfig(PsdImage psd)
+        {
+            return Synchronize(psd, new PsdUiToolkitExportConfigData());
+        }
+
         public static PsdUiToolkitExportConfigData Synchronize(
             PsdImage psd,
             PsdUiToolkitExportConfigData data)

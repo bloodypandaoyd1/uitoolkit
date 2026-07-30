@@ -147,6 +147,66 @@ namespace PsdTools.UIToolKit.Tests
         }
 
         [Test]
+        public void CreateDefaultConfig_DiscardsSavedLayerAndVirtualGroupSettings()
+        {
+            PsdImage psd = PsdImage.Open(
+                PsdUiToolkitAssetPathUtility.GetDiskPath(
+                    "Assets/PsdToUIToolKit/psdui.psd"));
+            try
+            {
+                PsdUiToolkitExportConfigData saved =
+                    PsdUiToolkitConfigStore.CreateDefaultConfig(psd);
+                Assert.That(saved.layers, Is.Not.Empty);
+
+                saved.layers[0].name = "Saved custom layer name";
+                saved.layers[0].exported = false;
+                saved.layers[0].merge = true;
+                saved.layers[0].childrenLayout =
+                    PsdUiToolkitContainerLayout.Row;
+                saved.virtualGroups = new[]
+                {
+                    new PsdUiToolkitVirtualGroupConfig
+                    {
+                        id = "saved-group",
+                        name = "Saved Group",
+                    },
+                };
+
+                PsdUiToolkitExportConfigData reset =
+                    PsdUiToolkitConfigStore.CreateDefaultConfig(psd);
+                List<Layer> layers = new List<Layer>();
+                PsdUiToolkitConfigStore.CollectLayers(psd.Root, layers);
+                Dictionary<int, Layer> layersById = new Dictionary<int, Layer>();
+                foreach (Layer layer in layers)
+                {
+                    if (layer.LayerId.HasValue)
+                        layersById[layer.LayerId.Value] = layer;
+                }
+
+                Assert.That(reset.virtualGroups, Is.Empty);
+                Assert.That(reset.layers, Has.Length.EqualTo(layersById.Count));
+                foreach (PsdUiToolkitLayerConfig actual in reset.layers)
+                {
+                    Assert.That(layersById.ContainsKey(actual.id), Is.True);
+                    PsdUiToolkitLayerConfig expected =
+                        PsdUiToolkitLayerConfig.CreateDefault(
+                            layersById[actual.id]);
+                    Assert.That(
+                        JsonUtility.ToJson(actual),
+                        Is.EqualTo(JsonUtility.ToJson(expected)));
+                }
+
+                string resetJson = PsdUiToolkitConfigStore.Serialize(reset);
+                Assert.That(resetJson, Does.Not.Contain("Saved custom layer name"));
+                Assert.That(resetJson, Does.Not.Contain("saved-group"));
+            }
+            finally
+            {
+                psd.ReleaseAllData();
+            }
+        }
+
+        [Test]
         public void OrderChildrenForFlow_PreservesAbsolutePsdSlots()
         {
             PsdUiToolkitLayoutNode background = CreateRoleLeaf(

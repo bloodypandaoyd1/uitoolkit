@@ -324,10 +324,19 @@ namespace PsdTools.UIToolKit
             if (string.IsNullOrEmpty(_psdPath))
                 return;
 
-            LoadPsd(_psdPath);
+            if (!EditorUtility.DisplayDialog(
+                "Reload PSD",
+                "Reloading will permanently discard all saved configuration for the current PSD and restore the original defaults. This action cannot be undone.",
+                "OK",
+                "Cancel"))
+            {
+                return;
+            }
+
+            LoadPsd(_psdPath, true);
         }
 
-        private void LoadPsd(string path)
+        private void LoadPsd(string path, bool resetConfig = false)
         {
             ReleaseCurrentPsd();
             _psdPath = path;
@@ -335,7 +344,17 @@ namespace PsdTools.UIToolKit
             try
             {
                 _psd = PsdImage.Open(path);
-                _configData = PsdUiToolkitConfigStore.LoadAndSync(_psdPath, _psd);
+                if (resetConfig)
+                {
+                    _configData =
+                        PsdUiToolkitConfigStore.CreateDefaultConfig(_psd);
+                    PsdUiToolkitConfigStore.Save(_psdPath, _configData);
+                }
+                else
+                {
+                    _configData =
+                        PsdUiToolkitConfigStore.LoadAndSync(_psdPath, _psd);
+                }
                 PsdUiToolkitConfigStore.ApplyToPsd(_psd, _configData);
                 _configMap = new PsdUiToolkitLayerConfigMap(_configData);
                 _layoutHistory.Reset(_configData);

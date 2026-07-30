@@ -41,7 +41,7 @@ The main window has three working areas:
 - **Canvas Preview**: switches between Layout, PSD, and Split views. The layout preview can be used to select and arrange nodes.
 - **Inspector**: edits the selected layer or virtual layout group and contains the export settings.
 
-The toolbar provides **Open PSD**, **Reload**, **Undo**, **Redo**, and **Export**. Undo and Redo apply to layout edits in the current window session.
+The toolbar provides **Open PSD**, **Reload**, **Undo**, **Redo**, and **Export**. Reload asks for confirmation, then reparses the current PSD and permanently resets its PSD-specific configuration to the original defaults. Undo and Redo apply to layout edits in the current window session.
 
 ## Layer export parameters
 
