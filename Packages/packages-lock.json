@@ -17,6 +17,14 @@
       },
       "hash": "c14de1e6dc01ab42d2bb358730cff954bce0ce6b"
     },
+    "com.unity.asset-store-tools": {
+      "version": "file:com.unity.asset-store-tools",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.1"
+      }
+    },
     "com.unity.ext.nunit": {
       "version": "1.0.6",
       "depth": 1,
