@@ -1,0 +1,17 @@
+THIRD-PARTY NOTICES
+
+This package includes the following third-party component:
+
+Component: psd-tools
+Source: https://github.com/psd-tools/psd-tools
+License: MIT License
+Copyright: Copyright (c) 2019 Kota Yamaguchi
+
+Use in this package:
+The PsdTools folder contains a modified C# and Unity adaptation of portions of
+psd-tools for reading, writing, and processing Adobe Photoshop PSD/PSB data.
+The adaptation and Unity-specific modifications are included in this package.
+
+The complete MIT license text is included at:
+ThirdPartyLicenses/psd-tools-MIT-License.txt
+
