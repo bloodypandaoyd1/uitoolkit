@@ -60,11 +60,11 @@
             "nineSliceMinCenterCols": 10,
             "nineSliceMinCenterRows": 10,
             "nineSliceMinSameZone": 15,
-            "childrenLayout": 2,
+            "childrenLayout": 1,
             "itemRole": 0,
-            "mainAxisDistribution": 1,
+            "mainAxisDistribution": 0,
             "crossAxisAlignment": 0,
-            "wrapMode": 1,
+            "wrapMode": 0,
             "multiLineDistribution": 0
         },
         {
@@ -1226,7 +1226,7 @@
             "nineSliceMinCenterCols": 10,
             "nineSliceMinCenterRows": 10,
             "nineSliceMinSameZone": 15,
-            "childrenLayout": 3,
+            "childrenLayout": 1,
             "itemRole": 0,
             "mainAxisDistribution": 0,
             "crossAxisAlignment": 0,
@@ -1674,8 +1674,5 @@
             "multiLineDistribution": 0
         }
     ],
-    "virtualGroups": [],
-    "buttons": [],
-    "componentDefinitions": [],
-    "componentInstances": []
+    "virtualGroups": []
 }
